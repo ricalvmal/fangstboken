@@ -98,6 +98,12 @@ async function makeSupabaseApi(cfg){
     },
     async removePhoto(path){ await sb.storage.from("photos").remove([path]); },
     async memberStatus(){ return chk(await sb.rpc("member_status")) || []; },
+    async changePassword(email, current, next){
+      const r = await sb.auth.signInWithPassword({ email, password: current });
+      if (r.error) throw new Error("WRONG_PASSWORD");
+      chk(await sb.auth.updateUser({ password: next }));
+    },
+    async adminSetPassword(email, pw){ chk(await sb.rpc("admin_set_password", { target_email: email, new_password: pw })); },
     fetchWeather: openMeteo,
   };
 }
@@ -230,8 +236,10 @@ function renderAuth(){
       <button class="btn primary" type="submit" id="aBtn">${login ? "Logga in" : "Skapa konto"}</button>
     </form>
     <p class="muted" style="margin:0">${login ? `Första gången? <button class="linkbtn" id="aSwitch">Skapa konto</button>` : `Har du redan ett konto? <button class="linkbtn" id="aSwitch">Logga in</button>`}</p>
+    ${login?`<p class="muted" style="margin:0">Glömt lösenordet? <button class="linkbtn" id="aForgot">Så gör du</button></p><div id="aForgotBox"></div>`:""}
   </div>`;
   $("#aSwitch").onclick = () => { S.authMode = login ? "signup" : "login"; renderAuth(); };
+  if ($("#aForgot")) $("#aForgot").onclick = () => { $("#aForgotBox").innerHTML = `<div class="banner"><div>Be den som administrerar Fångstboken sätta ett <b>tillfälligt lösenord</b> åt dig under Fiskekompisar. Logga sedan in med det och byt till ett eget under <b>Fiskekompisar → Konto → Byt lösenord</b>.</div></div>`; };
   $("#authForm").onsubmit = async (e) => {
     e.preventDefault(); const err=$("#aErr"); err.textContent="";
     const email=$("#aEmail").value.trim(), pw=$("#aPw").value;
@@ -812,13 +820,20 @@ function renderGang(){
   const admin = S.me.is_admin;
   return `<div class="view" style="max-width:720px"><div class="section-head"><h2>Fiskekompisar</h2><span class="muted num">${S.members.filter(m=>m.active).length} fiskare</span></div>
     <div class="list">${S.members.slice().sort((a,b)=>(b.active-a.active)||a.name.localeCompare(b.name,"sv")).map(m=>`<div class="row mrow" style="${m.active?"":"opacity:.55"}">${avatar(m)}<div class="grow"><b>${esc(m.name)}${m.is_admin?` <span class="tag-unsure">admin</span>`:""}${m.active?"":` <span class="tag-unsure">inaktiv</span>`}</b><span>${esc(m.email)}</span>${admin?statusLine(m):""}</div>
-      ${m.id===S.me.id?`<button class="btn ghost" data-rename>Byt namn</button>`:`<div class="mact">${m.active?`<button class="btn ghost" data-invite="${esc(m.id)}">Bjud in</button>`:""}${admin&&!m.is_admin?`<button class="btn ghost" data-toggle="${esc(m.id)}">${m.active?"Inaktivera":"Aktivera"}</button>`:""}</div>`}</div>`).join("")}</div>
+      ${m.id===S.me.id?`<button class="btn ghost" data-rename>Byt namn</button>`:`<div class="mact">${m.active?`<button class="btn ghost" data-invite="${esc(m.id)}">Bjud in</button>`:""}${admin&&m.active&&S.status&&S.status[m.email.toLowerCase()]?`<button class="btn ghost" data-setpw="${esc(m.id)}">Nytt lösenord</button>`:""}${admin&&!m.is_admin?`<button class="btn ghost" data-toggle="${esc(m.id)}">${m.active?"Inaktivera":"Aktivera"}</button>`:""}</div>`}</div>`).join("")}</div>
     ${admin?`<form class="panel" id="addMember" novalidate><h3>Lägg till fiskare</h3><p class="sub">Personen skapar sedan ett konto i appen med samma e-postadress och ett eget lösenord.</p>
       <div class="row2"><div class="field"><label for="amName">Namn</label><input class="inp" id="amName" maxlength="30" autocomplete="off"></div><div class="field"><label for="amEmail">E-post</label><input class="inp" id="amEmail" type="email" autocomplete="off"></div></div>
       <div class="err" id="amErr" role="alert"></div><button class="btn primary" type="submit">Lägg till</button></form>`:""}
     <section class="panel"><h3>Säkerhetskopia</h3><p class="sub">Ladda ner alla fångster, turer, vatten och beten. Gör det någon gång per säsong.</p>
       <div style="display:flex;gap:10px;flex-wrap:wrap"><button class="btn" data-export="json">Allt som JSON</button><button class="btn" data-export="csv">Fångster som CSV (Excel)</button></div></section>
-    <section class="panel"><h3>Konto</h3><p class="sub">Inloggad som ${esc(S.session.email)}</p><div><button class="btn" data-logout>Logga ut</button></div></section>
+    <section class="panel"><h3>Konto</h3><p class="sub">Inloggad som ${esc(S.session.email)}</p>
+      <form id="pwForm" style="display:grid;gap:12px" novalidate><h3 style="font-size:17px">Byt lösenord</h3>
+        <div class="field"><label for="pwCur">Nuvarande lösenord</label><input class="inp" type="password" id="pwCur" autocomplete="current-password"></div>
+        <div class="row2"><div class="field"><label for="pwNew">Nytt lösenord</label><input class="inp" type="password" id="pwNew" autocomplete="new-password" minlength="8"></div>
+          <div class="field"><label for="pwNew2">Upprepa nytt</label><input class="inp" type="password" id="pwNew2" autocomplete="new-password"></div></div>
+        <div class="err" id="pwErr" role="alert"></div>
+        <div style="display:flex;gap:10px;flex-wrap:wrap"><button class="btn primary" type="submit" id="pwSave">Byt lösenord</button><button class="btn" type="button" data-logout>Logga ut</button></div>
+      </form></section>
   </div>`;
 }
 async function addMember(){
@@ -850,6 +865,53 @@ function openInvite(m, justAdded=false){
     </div>`);
   if ($("#invShare")) $("#invShare").onclick = async () => { try{ await navigator.share({ title: t.subject, text: t.body }); }catch(e){} };
   $("#invCopy").onclick = async () => { try{ await navigator.clipboard.writeText(t.subject + "\n\n" + t.body); toast("Texten är kopierad"); }catch(e){ toast("Kunde inte kopiera. Markera texten nedan i stället."); } };
+}
+// Byta eget lösenord: kontrollerar det nuvarande genom att logga in igen, sedan sätts det nya.
+async function changeOwnPassword(){
+  const err=$("#pwErr"); err.textContent="";
+  const cur=$("#pwCur").value, n1=$("#pwNew").value, n2=$("#pwNew2").value;
+  if (!cur){ err.textContent="Skriv ditt nuvarande lösenord."; return; }
+  if (n1.length < 8){ err.textContent="Det nya lösenordet måste ha minst 8 tecken."; return; }
+  if (n1 !== n2){ err.textContent="De nya lösenorden är inte likadana."; return; }
+  if (n1 === cur){ err.textContent="Välj ett annat lösenord än det nuvarande."; return; }
+  const btn=$("#pwSave"); btn.disabled=true; btn.innerHTML=`<span class="spin"></span> Byter…`;
+  try{ await S.api.changePassword(S.session.email, cur, n1); $("#pwForm").reset(); toast("Lösenordet är bytt"); }
+  catch(e){ err.textContent = e?.message==="WRONG_PASSWORD" ? "Det nuvarande lösenordet stämmer inte." : errText(e); }
+  btn.disabled=false; btn.textContent="Byt lösenord";
+}
+// Admin: tillfälligt lösenord åt en kompis som glömt sitt.
+function tempPassword(){
+  const w=["Gadda","Abborre","Gos","Oring","Jigg","Wobbler","Drag","Spinn","Napp","Hugg","Sjo","Vass","Bete","Lina"];
+  const r=(n)=>{ const a=new Uint32Array(1); crypto.getRandomValues(a); return a[0]%n; };
+  return `${w[r(w.length)]}-${1000+r(9000)}-${w[r(w.length)]}`;
+}
+function openSetPassword(m){
+  const pw=tempPassword();
+  openOverlay(`<div class="sheet-head"><h2>Nytt lösenord åt ${esc(m.name)}</h2><button class="x" data-close aria-label="Stäng">${I.x}</button></div>
+    <div class="form" id="spBox">
+      <p class="muted" style="margin:0">Sätt ett tillfälligt lösenord och skicka det till ${esc(m.name)}. Hen loggar in med det och byter till ett eget under Konto. Det gamla lösenordet slutar fungera.</p>
+      <div class="field"><label for="spPw">Tillfälligt lösenord</label><input class="inp" id="spPw" value="${esc(pw)}" autocomplete="off"></div>
+      <div class="err" id="spErr" role="alert"></div>
+      <div class="form-actions"><button type="button" class="btn ghost" data-close>Avbryt</button><button type="button" class="btn primary" id="spSave">Sätt lösenordet</button></div>
+    </div>`);
+  $("#spSave").onclick=async()=>{
+    const v=$("#spPw").value.trim(), err=$("#spErr"); err.textContent="";
+    if (v.length<8){ err.textContent="Minst 8 tecken."; return; }
+    const btn=$("#spSave"); btn.disabled=true; btn.innerHTML=`<span class="spin"></span> Sätter…`;
+    try{
+      await S.api.adminSetPassword(m.email, v);
+      const url=location.origin+location.pathname;
+      const text=`Hej ${m.name}! Ditt tillfälliga lösenord till Fångstboken är: ${v}\n\nLogga in på ${url} med ${m.email} och byt sedan till ett eget lösenord under Fiskekompisar → Konto → Byt lösenord.`;
+      const mailto=`mailto:${encodeURIComponent(m.email)}?subject=${encodeURIComponent("Nytt lösenord till Fångstboken")}&body=${encodeURIComponent(text)}`;
+      $("#spBox").innerHTML=`<div class="banner"><div><b>Klart.</b> ${esc(m.name)} kan nu logga in med <b>${esc(v)}</b>.</div></div>
+        <a class="btn primary" href="${esc(mailto)}">Skicka mejl till ${esc(m.email)}</a>
+        ${navigator.share?`<button class="btn" id="spShare">Dela via SMS, WhatsApp …</button>`:""}
+        <button class="btn" id="spCopy">Kopiera texten</button><button class="btn ghost" data-close>Stäng</button>`;
+      $("#spBox").querySelectorAll("[data-close]").forEach(b=>b.onclick=closeOverlay);
+      if ($("#spShare")) $("#spShare").onclick=async()=>{ try{ await navigator.share({ text }); }catch(e){} };
+      $("#spCopy").onclick=async()=>{ try{ await navigator.clipboard.writeText(text); toast("Texten är kopierad"); }catch(e){ toast("Kunde inte kopiera."); } };
+    }catch(e){ err.textContent = /does not exist|could not find/i.test(e?.message||"") ? "Funktionen saknas. Kör SQL-filen 4-losenord.sql i Supabase först." : errText(e); btn.disabled=false; btn.textContent="Sätt lösenordet"; }
+  };
 }
 function download(name, text, type){
   const a=document.createElement("a"); a.href=URL.createObjectURL(new Blob([text],{type})); a.download=name; document.body.appendChild(a); a.click();
@@ -1143,6 +1205,8 @@ function bindView(){
   $$("#main [data-logout]").forEach(b=>b.onclick=async()=>{ await S.api.signOut(); S.session=null; S.me=null; renderAuth(); });
   $$("#main [data-rename]").forEach(b=>b.onclick=async()=>{ const n=prompt("Ditt namn i appen", S.me.name); if (n && n.trim()){ try{ await dbUpdate("members", S.me.id, { name:n.trim().slice(0,30) }); S.me=member(S.me.id); render(); }catch(e){ toast(errText(e)); } } });
   $$("#main [data-invite]").forEach(b=>b.onclick=()=>openInvite(member(b.dataset.invite)));
+  $$("#main [data-setpw]").forEach(b=>b.onclick=()=>openSetPassword(member(b.dataset.setpw)));
+  const pwf=$("#pwForm"); if (pwf) pwf.onsubmit=(e)=>{ e.preventDefault(); changeOwnPassword(); };
   $$("#main [data-toggle]").forEach(b=>b.onclick=async()=>{ const m=member(b.dataset.toggle); try{ await dbUpdate("members", m.id, { active:!m.active }); render(); }catch(e){ toast(errText(e)); } });
   const am=$("#addMember"); if (am) am.onsubmit=(e)=>{ e.preventDefault(); addMember(); };
   bindBaitList();
