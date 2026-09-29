@@ -168,7 +168,7 @@ function renderAuth(){
   const login = S.authMode === "login";
   $("#main").innerHTML = `<div class="view auth">
     <h2>${login ? "Logga in" : "Skapa konto"}</h2>
-    <p class="muted" style="margin:0">${login ? "Logga in med e-post och lösenord." : "Använd den e-postadress som finns med i gänget. Välj ett lösenord på minst 8 tecken."}</p>
+    <p class="muted" style="margin:0">${login ? "Logga in med e-post och lösenord." : "Använd den e-postadress som finns med bland fiskekompisarna. Välj ett lösenord på minst 8 tecken."}</p>
     <form class="panel" id="authForm" novalidate>
       <div class="field"><label for="aEmail">E-post</label><input class="inp" id="aEmail" type="email" autocomplete="email" inputmode="email" required></div>
       <div class="field"><label for="aPw">Lösenord</label><input class="inp" id="aPw" type="password" autocomplete="${login?"current-password":"new-password"}" minlength="8" required></div>
@@ -197,9 +197,9 @@ function renderAuth(){
 }
 function renderNotMember(){
   $("#nav").hidden = true; $("#meBtn").hidden = true;
-  $("#main").innerHTML = `<div class="view auth"><h2>Inte med i gänget än</h2>
+  $("#main").innerHTML = `<div class="view auth"><h2>Inte med bland fiskekompisarna än</h2>
     <p style="margin:0">Du är inloggad som <b>${esc(S.session?.email)}</b>, men den adressen finns inte med i Fångstboken.</p>
-    <p class="muted" style="margin:0">Be den som administrerar appen lägga till adressen under Gänget. Ladda sedan om sidan.</p>
+    <p class="muted" style="margin:0">Be den som administrerar appen lägga till adressen under Fiskekompisar. Ladda sedan om sidan.</p>
     <div style="display:flex;gap:10px;flex-wrap:wrap"><button class="btn primary" id="nmReload">Försök igen</button><button class="btn" id="nmOut">Logga ut</button></div></div>`;
   $("#nmReload").onclick = () => afterAuth();
   $("#nmOut").onclick = async () => { await S.api.signOut(); S.session=null; renderAuth(); };
@@ -657,9 +657,9 @@ function renderTop(){
   const pbs=[...bySp.values()].sort((a,b)=>b.weight_kg-a.weight_kg);
   const year=new Date().getFullYear(), yr=S.catches.filter(c=>new Date(c.time).getFullYear()===year).length;
   return `<div class="view">
-    <div class="section-head"><h2>Gänget</h2><span class="muted num">${yr} fångster ${year}</span></div>
+    <div class="section-head"><h2>Fiskekompisar</h2><span class="muted num">${yr} fångster ${year}</span></div>
     <div class="lb">${rows.map((r,i)=>`<div class="lb-row"><span class="rank">${i+1}</span>${avatar(r.m,"lg")}<div><div class="name">${esc(r.m.name)}</div><div class="stats num">${r.sp} arter · ${r.kg.toLocaleString("sv-SE",{maximumFractionDigits:1})} kg totalt${r.big?` · största ${esc(r.big.species.toLowerCase())} ${esc(fmtKg(r.big.weight_kg))}`:""}</div></div><div class="big num">${r.n}<small>fångster</small></div></div>`).join("")}</div>
-    <div class="section-head" style="margin-top:8px"><h2>Rekord per art</h2><span class="muted">Tyngsta fisken i gänget</span></div>
+    <div class="section-head" style="margin-top:8px"><h2>Rekord per art</h2><span class="muted">Tyngsta fisken bland kompisarna</span></div>
     ${pbs.length?`<div class="pbs">${pbs.map(c=>{const m=member(c.member_id);return `<button class="pb" data-open="${esc(c.id)}"><div class="ph"><div class="noimg" style="position:absolute;inset:0;display:grid;place-items:center;color:var(--muted)">${I.fish}</div>${photoImg(c.photo)}</div><div class="b"><span class="sp">${esc(c.species)}</span><span class="w num">${esc(fmtKg(c.weight_kg))}${c.length_cm?` · ${fmt1(c.length_cm)} cm`:""}</span><span class="who">${avatar(m,"sm")}${esc(m?.name||"")}</span></div></button>`}).join("")}</div>`:`<p class="muted" style="margin:0">Rekorden visas när fångster har en vikt.</p>`}
   </div>`;
 }
@@ -668,7 +668,7 @@ function renderTop(){
 function renderMore(){
   const row=(tab,title,sub)=>`<button class="row" data-go="${tab}"><div class="grow"><b>${title}</b><span>${sub}</span></div><span class="chev">${I.chev}</span></button>`;
   return `<div class="view" style="max-width:640px"><div class="section-head"><h2>Mer</h2></div><div class="list">
-    ${row("baits","Betesboxen",`${S.baits.length} beten`)}${row("lakes","Vatten",`${S.lakes.length} sparade`)}${row("gang","Gänget och konto",`${S.members.filter(m=>m.active).length} fiskare · export · logga ut`)}</div></div>`;
+    ${row("baits","Betesboxen",`${S.baits.length} beten`)}${row("lakes","Vatten",`${S.lakes.length} sparade`)}${row("gang","Fiskekompisar och konto",`${S.members.filter(m=>m.active).length} fiskare · export · logga ut`)}</div></div>`;
 }
 function renderLakes(){
   const counts=new Map(); S.catches.forEach(c=>{ if(c.lake_id) counts.set(c.lake_id,(counts.get(c.lake_id)||0)+1); });
@@ -682,7 +682,7 @@ function renderLakes(){
 }
 function renderGang(){
   const admin = S.me.is_admin;
-  return `<div class="view" style="max-width:720px"><div class="section-head"><h2>Gänget</h2><span class="muted num">${S.members.filter(m=>m.active).length} fiskare</span></div>
+  return `<div class="view" style="max-width:720px"><div class="section-head"><h2>Fiskekompisar</h2><span class="muted num">${S.members.filter(m=>m.active).length} fiskare</span></div>
     <div class="list">${S.members.slice().sort((a,b)=>(b.active-a.active)||a.name.localeCompare(b.name,"sv")).map(m=>`<div class="row" style="${m.active?"":"opacity:.55"}">${avatar(m)}<div class="grow"><b>${esc(m.name)}${m.is_admin?` <span class="tag-unsure">admin</span>`:""}${m.active?"":` <span class="tag-unsure">inaktiv</span>`}</b><span>${esc(m.email)}</span></div>
       ${m.id===S.me.id?`<button class="btn ghost" data-rename>Byt namn</button>`:admin&&!m.is_admin?`<button class="btn ghost" data-toggle="${esc(m.id)}">${m.active?"Inaktivera":"Aktivera"}</button>`:""}</div>`).join("")}</div>
     ${admin?`<form class="panel" id="addMember" novalidate><h3>Lägg till fiskare</h3><p class="sub">Personen skapar sedan ett konto i appen med samma e-postadress och ett eget lösenord.</p>
@@ -851,7 +851,7 @@ function openDetail(id){
   host.querySelectorAll("[data-bait-open]").forEach(b=>b.onclick=()=>openBait(b.dataset.baitOpen));
   host.querySelectorAll("[data-trip-open]").forEach(b=>b.onclick=()=>openTrip(b.dataset.tripOpen));
   $("#dDel").onclick=()=>{
-    $("#dConfirm").innerHTML=`<div class="banner warn" style="display:grid;gap:10px"><span>Ta bort fångsten för alla i gänget? Det går inte att ångra.</span><div style="display:flex;gap:10px"><button class="btn danger" id="dYes">Ta bort</button><button class="btn ghost" id="dNo">Avbryt</button></div></div>`;
+    $("#dConfirm").innerHTML=`<div class="banner warn" style="display:grid;gap:10px"><span>Ta bort fångsten för alla fiskekompisar? Det går inte att ångra.</span><div style="display:flex;gap:10px"><button class="btn danger" id="dYes">Ta bort</button><button class="btn ghost" id="dNo">Avbryt</button></div></div>`;
     $("#dNo").onclick=()=>$("#dConfirm").innerHTML="";
     $("#dYes").onclick=async()=>{ try{ await dbRemove("catches", c.id); if (c.photo && !S.catches.some(x=>x.photo===c.photo)) S.api.removePhoto(c.photo).catch(()=>{}); closeOverlay(); render(); toast("Fångsten är borttagen"); }catch(e){ toast(errText(e)); } };
   };

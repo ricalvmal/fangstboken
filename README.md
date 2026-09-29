@@ -26,7 +26,7 @@ Supabase gratis-e-post skickar bara till dig själv, två mejl i timmen. Därfö
 2. Se till att **Email** är påslaget och att **Allow new users to sign up** är på.
 3. Stäng av **Confirm email** och spara.
 
-Det är tryggt: bara e-postadresser som du har lagt till under *Gänget* i appen kommer åt något. Andra kan skapa ett konto men ser ingenting.
+Det är tryggt: bara e-postadresser som du har lagt till under *Fiskekompisar* i appen kommer åt något. Andra kan skapa ett konto men ser ingenting.
 
 ### 3. Hämta adress och nyckel
 
@@ -61,7 +61,7 @@ Därefter körs den automatiskt varje morgon.
 ### 6. Logga in och bjud in gänget
 
 1. Öppna adressen från steg 4.4. Välj **Skapa konto**, använd din e-post och välj ett lösenord.
-2. Gå till **Gänget** (under *Mer* på mobilen) och lägg till kompisarna med namn och e-post.
+2. Gå till **Fiskekompisar** (under *Mer* på mobilen) och lägg till kompisarna med namn och e-post.
 3. Skicka adressen till dem. De väljer **Skapa konto** med samma e-post som du lade in och ett eget lösenord.
 4. Lägg appen på hemskärmen:
    - **iPhone (Safari):** Dela → Lägg till på hemskärmen.
@@ -75,7 +75,7 @@ Därefter körs den automatiskt varje morgon.
 - **＋** registrerar en fångst. Tid och position läses från bilden, vattnet känns igen och vädret hämtas direkt.
 - Glömde du starta turen? Välj **Turer → Lägg in tur i efterhand**, så kopplas fångsterna från den tiden till turen.
 - Under **Statistik → Mönster** finns hugg per timme, kombinationer som nappar och huggperioder. Varje avslutad tur har en tidslinje med tryck och temperatur.
-- **Gänget → Säkerhetskopia** laddar ner allt som JSON, eller fångsterna som CSV för Excel. Gör det någon gång per säsong.
+- **Fiskekompisar → Säkerhetskopia** laddar ner allt som JSON, eller fångsterna som CSV för Excel. Gör det någon gång per säsong.
 
 ## Glömt lösenord
 
