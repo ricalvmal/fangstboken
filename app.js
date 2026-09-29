@@ -1053,6 +1053,9 @@ function bindView(){
     c.onmouseleave=()=>{$("#tipHost").innerHTML="";};
   });
 }
+// Menyn på datorn ska fastna precis under rubrikraden, vars höjd beror på typsnittet.
+const setTopH=()=>{ const h=$(".top")?.offsetHeight; if (h) document.documentElement.style.setProperty("--top-h", h+"px"); };
+setTopH(); window.addEventListener("resize", setTopH); document.fonts?.ready?.then(setTopH);
 $$(".tab").forEach(t=>t.onclick=()=>go(t.dataset.tab));
 $("#fab").onclick=()=>{ if (S.me) openForm(); };
 $("#meBtn").onclick=()=>go("gang");

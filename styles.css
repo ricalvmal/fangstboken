@@ -74,7 +74,7 @@ h1,h2,h3{font-family:var(--display);font-weight:600;letter-spacing:.01em;text-wr
 
 @media (min-width:960px){
   body{padding-bottom:32px}
-  .nav{position:sticky;top:calc(env(safe-area-inset-top,0px) + 64px);bottom:auto;left:auto;right:auto;border:0;background:none;padding:0;align-self:start}
+  .nav{position:sticky;top:var(--top-h,72px);bottom:auto;left:auto;right:auto;border:0;background:none;padding:16px 0 0;align-self:start}
   .nav-in{height:auto;display:grid;grid-template-columns:1fr;gap:4px;max-width:none}
   .tab{grid-template-columns:22px 1fr;justify-items:start;align-items:center;gap:12px;font-size:15px;padding:10px 12px;border-radius:12px}
   .tab[aria-current="page"]{background:var(--surface)}
