@@ -51,6 +51,7 @@ async function makeSupabaseApi(cfg){
       d.forEach(x => { if (x.signedUrl) m[x.path] = x.signedUrl; }); return m;
     },
     async removePhoto(path){ await sb.storage.from("photos").remove([path]); },
+    async memberStatus(){ return chk(await sb.rpc("member_status")) || []; },
     fetchWeather: openMeteo,
   };
 }
@@ -743,11 +744,28 @@ function openLake(id){
       catch(ex){ toast(errText(ex)); busy($("#lkYes"),false,"Ta bort"); } };
   };
 }
+// Inloggningsstatus (bara admin). Hämtas när sidan Fiskekompisar visas, högst en gång per minut.
+function statusLine(m){
+  if (S.statusErr) return `<span>Status kunde inte hämtas. Har SQL-filen 3-inloggningsstatus.sql körts?</span>`;
+  if (!S.status) return `<span>Hämtar status…</span>`;
+  const st = S.status[m.email.toLowerCase()];
+  if (!st) return `<span style="color:var(--warn)">Har inte skapat konto än</span>`;
+  return st.last_sign_in_at ? `<span style="color:var(--good)">Har konto · senast inloggad ${esc(fmtDate(st.last_sign_in_at))}</span>` : `<span>Har konto men har inte loggat in</span>`;
+}
+async function loadStatus(force=false){
+  if (!S.me?.is_admin || !S.api.memberStatus) return;
+  if (!force && S.statusAt && Date.now() - S.statusAt < 60000) return;
+  S.statusAt = Date.now();
+  try{ const rows = await S.api.memberStatus(); S.status = {}; rows.forEach(r => S.status[r.email.toLowerCase()] = r); S.statusErr = false; }
+  catch(e){ S.statusErr = true; }
+  if (S.tab === "gang") render();
+}
 function renderGang(){
+  setTimeout(() => loadStatus(), 0);
   const admin = S.me.is_admin;
   return `<div class="view" style="max-width:720px"><div class="section-head"><h2>Fiskekompisar</h2><span class="muted num">${S.members.filter(m=>m.active).length} fiskare</span></div>
-    <div class="list">${S.members.slice().sort((a,b)=>(b.active-a.active)||a.name.localeCompare(b.name,"sv")).map(m=>`<div class="row" style="${m.active?"":"opacity:.55"}">${avatar(m)}<div class="grow"><b>${esc(m.name)}${m.is_admin?` <span class="tag-unsure">admin</span>`:""}${m.active?"":` <span class="tag-unsure">inaktiv</span>`}</b><span>${esc(m.email)}</span></div>
-      ${m.id===S.me.id?`<button class="btn ghost" data-rename>Byt namn</button>`:admin&&!m.is_admin?`<button class="btn ghost" data-toggle="${esc(m.id)}">${m.active?"Inaktivera":"Aktivera"}</button>`:""}</div>`).join("")}</div>
+    <div class="list">${S.members.slice().sort((a,b)=>(b.active-a.active)||a.name.localeCompare(b.name,"sv")).map(m=>`<div class="row mrow" style="${m.active?"":"opacity:.55"}">${avatar(m)}<div class="grow"><b>${esc(m.name)}${m.is_admin?` <span class="tag-unsure">admin</span>`:""}${m.active?"":` <span class="tag-unsure">inaktiv</span>`}</b><span>${esc(m.email)}</span>${admin?statusLine(m):""}</div>
+      ${m.id===S.me.id?`<button class="btn ghost" data-rename>Byt namn</button>`:`<div class="mact">${m.active?`<button class="btn ghost" data-invite="${esc(m.id)}">Bjud in</button>`:""}${admin&&!m.is_admin?`<button class="btn ghost" data-toggle="${esc(m.id)}">${m.active?"Inaktivera":"Aktivera"}</button>`:""}</div>`}</div>`).join("")}</div>
     ${admin?`<form class="panel" id="addMember" novalidate><h3>Lägg till fiskare</h3><p class="sub">Personen skapar sedan ett konto i appen med samma e-postadress och ett eget lösenord.</p>
       <div class="row2"><div class="field"><label for="amName">Namn</label><input class="inp" id="amName" maxlength="30" autocomplete="off"></div><div class="field"><label for="amEmail">E-post</label><input class="inp" id="amEmail" type="email" autocomplete="off"></div></div>
       <div class="err" id="amErr" role="alert"></div><button class="btn primary" type="submit">Lägg till</button></form>`:""}
@@ -763,8 +781,28 @@ async function addMember(){
   if (!/^\S+@\S+\.\S+$/.test(email)){ err.textContent="Skriv en giltig e-postadress."; return; }
   if (S.members.some(m=>m.email.toLowerCase()===email)){ err.textContent="Den adressen finns redan."; return; }
   const used=new Set(S.members.filter(m=>m.active).map(m=>m.color)); let color=0; while(used.has(color)&&color<3) color++;
-  try{ await dbInsert("members",{ name, email, color }); render(); toast(`${name} är tillagd. Hen skapar konto med ${email}.`); }
+  try{ const m = await dbInsert("members",{ name, email, color }); render(); openInvite(m, true); }
   catch(e){ err.textContent=errText(e); }
+}
+// Inbjudan: öppnar ditt eget mejlprogram med allt ifyllt, eller delar texten via SMS/WhatsApp.
+function inviteText(m){
+  const url = location.origin + location.pathname;
+  return { subject: "Välkommen till Fångstboken",
+    body: `Hej ${m.name}!\n\nJag har lagt till dig i Fångstboken, vår gemensamma loggbok för fångster, fisketurer och väder.\n\n1. Öppna ${url}\n2. Välj "Skapa konto" och använd den här e-postadressen: ${m.email}\n3. Välj ett eget lösenord (minst 8 tecken).\n4. Lägg appen på hemskärmen:\n   iPhone (Safari): Dela → Lägg till på hemskärmen\n   Android (Chrome): ⋮ → Lägg till på startskärmen\n\nVälkommen!\n${S.me.name}` };
+}
+function openInvite(m, justAdded=false){
+  const t = inviteText(m);
+  const mailto = `mailto:${encodeURIComponent(m.email)}?subject=${encodeURIComponent(t.subject)}&body=${encodeURIComponent(t.body)}`;
+  openOverlay(`<div class="sheet-head"><h2>Bjud in ${esc(m.name)}</h2><button class="x" data-close aria-label="Stäng">${I.x}</button></div>
+    <div style="display:grid;gap:14px">
+      ${justAdded?`<div class="banner"><div><b>${esc(m.name)} är tillagd.</b> <span class="muted">Skicka en inbjudan så att hen vet hur man kommer igång.</span></div></div>`:""}
+      <a class="btn primary" href="${esc(mailto)}" id="invMail">Skicka mejl till ${esc(m.email)}</a>
+      ${navigator.share?`<button class="btn" id="invShare">Dela via SMS, WhatsApp …</button>`:""}
+      <button class="btn" id="invCopy">Kopiera texten</button>
+      <section class="panel"><h3>Så här står det</h3><p style="margin:0;white-space:pre-wrap;font-size:14px">${esc(t.body)}</p></section>
+    </div>`);
+  if ($("#invShare")) $("#invShare").onclick = async () => { try{ await navigator.share({ title: t.subject, text: t.body }); }catch(e){} };
+  $("#invCopy").onclick = async () => { try{ await navigator.clipboard.writeText(t.subject + "\n\n" + t.body); toast("Texten är kopierad"); }catch(e){ toast("Kunde inte kopiera. Markera texten nedan i stället."); } };
 }
 function download(name, text, type){
   const a=document.createElement("a"); a.href=URL.createObjectURL(new Blob([text],{type})); a.download=name; document.body.appendChild(a); a.click();
@@ -1055,6 +1093,7 @@ function bindView(){
   $$("#main [data-export]").forEach(b=>b.onclick=()=>exportData(b.dataset.export));
   $$("#main [data-logout]").forEach(b=>b.onclick=async()=>{ await S.api.signOut(); S.session=null; S.me=null; renderAuth(); });
   $$("#main [data-rename]").forEach(b=>b.onclick=async()=>{ const n=prompt("Ditt namn i appen", S.me.name); if (n && n.trim()){ try{ await dbUpdate("members", S.me.id, { name:n.trim().slice(0,30) }); S.me=member(S.me.id); render(); }catch(e){ toast(errText(e)); } } });
+  $$("#main [data-invite]").forEach(b=>b.onclick=()=>openInvite(member(b.dataset.invite)));
   $$("#main [data-toggle]").forEach(b=>b.onclick=async()=>{ const m=member(b.dataset.toggle); try{ await dbUpdate("members", m.id, { active:!m.active }); render(); }catch(e){ toast(errText(e)); } });
   const am=$("#addMember"); if (am) am.onsubmit=(e)=>{ e.preventDefault(); addMember(); };
   bindBaitList();

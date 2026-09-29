@@ -338,3 +338,10 @@ img{max-width:100%}
 .picker.small{grid-template-columns:72px 1fr;align-items:center}
 .picker.small .pick-prev{min-height:72px;height:72px;width:72px;font-size:12px;text-align:center}
 .picker.small .pick-prev img{height:72px;max-height:none}
+a.btn{text-decoration:none;color:inherit}
+a.btn.primary{color:var(--accent-ink)}
+
+/* Fiskekompisar: statusrad får plats, knapparna hamnar under på smala skärmar */
+.mrow .grow span{white-space:normal}
+.mact{display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end}
+@media (max-width:560px){ .mrow{flex-wrap:wrap} .mrow .grow{flex:1 1 calc(100% - 52px)} .mrow .mact{flex:1 1 100%;justify-content:stretch} .mrow .mact .btn{flex:1} .mrow > .btn{margin-left:auto} }
