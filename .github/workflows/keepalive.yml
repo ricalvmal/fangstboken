@@ -1,0 +1,33 @@
+# Pingar Supabase en gång om dagen så att gratisprojektet inte pausas under vintern.
+# Läser adress och publik nyckel från config.js, så inga hemligheter behöver läggas in.
+# Den 1:a varje månad sparas en tidsstämpel i repot, eftersom GitHub stänger av
+# schemalagda körningar i repon som inte haft någon aktivitet på 60 dagar.
+name: Håll Supabase vaken
+on:
+  schedule:
+    - cron: "17 6 * * *"
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Pinga databasen
+        run: |
+          URL=$(grep -o 'supabaseUrl: *"[^"]*"' config.js | sed 's/.*"\(.*\)"/\1/')
+          KEY=$(grep -o 'supabaseAnonKey: *"[^"]*"' config.js | sed 's/.*"\(.*\)"/\1/')
+          if echo "$URL" | grep -q "DITT-PROJEKT"; then echo "config.js är inte ifylld än"; exit 0; fi
+          curl -fsS -X POST "$URL/rest/v1/rpc/keepalive" -H "apikey: $KEY" -H "Content-Type: application/json" -d '{}'
+          echo " ok"
+      - name: Månatlig tidsstämpel
+        run: |
+          if [ "$(date -u +%d)" = "01" ] || [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            date -u +%Y-%m-%dT%H:%M:%SZ > .keepalive
+            git config user.name "keepalive"
+            git config user.email "keepalive@users.noreply.github.com"
+            git add .keepalive
+            git commit -m "Keepalive $(date -u +%Y-%m-%d)" || true
+            git push || true
+          fi
