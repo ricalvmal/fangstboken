@@ -5,7 +5,53 @@ const { H } = A;
 // ---------- konstanter ----------
 const SPECIES = ["Abborre","Gädda","Gös","Öring","Regnbåge","Sik","Harr","Röding","Lax","Braxen","Mört","Karp","Id","Lake"];
 const TECH = ["Spinn","Jigg","Dropshot","Mete","Fluga","Trolling","Pimpel","Vertikal"];
-const BAIT_TYPES = ["Jigg","Wobbler","Jerkbait","Skeddrag","Spinnare","Spinnerbait","Dropshot","Pilk","Fluga","Mask/mete","Levande bete","Övrigt"];
+const BAIT_TYPES = ["Jigg","Wobbler","Jerkbait","Glidebait","Skeddrag","Spinnare","Spinnerbait","Dropshot","Pilk","Fluga","Mask/mete","Levande bete","Övrigt"];
+// Betskatalog: modeller med storlekar och färger enligt tillverkarens produktsida.
+// Alla färger finns inte i alla storlekar. Lägg till fler modeller här.
+const CATALOG = [
+  { brand:"Westin", model:"Swim", type:"Glidebait", source:"westin-fishing.com/en/hard-lures/swim-glidebait",
+    variants:[["6,5 cm","Suspending",6.5,9],["8 cm","Suspending",8,16],["8 cm","Sinking",8,19],["10 cm","Low Floating",10,31],["10 cm","Sinking",10,34],["12 cm","Suspending",12,53],["12 cm","Sinking",12,58],["13,5 cm","Suspending",13.5,null],["13,5 cm","Sinking",13.5,86],["15 cm","Suspending",15,107],["15 cm","Sinking",15,115]],
+    colors:["Bling Perch","Firetiger","Blank","Natural Pike","Official Roach","Parrot Special","See Me","Blueback Herring","3D Headlight","3D Golden Perch","Fire","Real Perch","Real Roach","Real Rudd","Real Pike","Real Baltic Pike","3D Rocky Red","3D Amber Perch","Chartreuse Flow","3D Motoroil Blood","3D Magic Pike","3D Magic Roach","3D Magic Perch","Spain","Argentina","Germany","Netherlands","France","England","Brazil","Scotland","Ireland","Poland","Denmark","Sweden"] },
+  { brand:"Westin", model:"Swim SW", type:"Glidebait", source:"westin-fishing.com/en/products/swim-sw",
+    variants:[["10 cm","Sinking",10,35],["12 cm","Sinking",12,60],["15 cm","Sinking",15,125]],
+    colors:["Coral Trout","Mahi Mahi","Atlantic Mackerel","Silver Shadow"] },
+];
+function openCatalog(){
+  const C = { m:0, v:null, cols:new Set() };
+  const draw = () => {
+    const m = CATALOG[C.m], v = C.v!=null ? m.variants[C.v] : null;
+    const nameFor = (col) => `${m.brand} ${m.model} ${v[0]} ${v[1]} · ${col}`;
+    const have = new Set(S.baits.map(b=>b.name.toLowerCase()));
+    $("#catBody").innerHTML = `
+      <div class="field"><span class="label">Modell</span><div class="chips">${CATALOG.map((x,i)=>`<button type="button" class="chip" data-cm="${i}" aria-pressed="${i===C.m}">${esc(x.brand+" "+x.model)}</button>`).join("")}</div></div>
+      <div class="field"><span class="label">Storlek</span><div class="chips">${m.variants.map((x,i)=>`<button type="button" class="chip small" data-cv="${i}" aria-pressed="${i===C.v}">${esc(x[0]+" "+x[1])}${x[3]?` · ${x[3]} g`:""}</button>`).join("")}</div></div>
+      ${v?`<div class="field"><span class="label">Färger du har (${C.cols.size} valda)</span><div class="chips">${m.colors.map(col=>{ const dup=have.has(nameFor(col).toLowerCase()); return `<button type="button" class="chip small" data-cc="${esc(col)}" aria-pressed="${C.cols.has(col)}" ${dup?"disabled title='Finns redan i boxen'":""}>${esc(col)}${dup?" ✓":""}</button>`; }).join("")}</div>
+        <span class="muted" style="font-size:13px">Alla färger finns inte i alla storlekar. ✓ betyder att betet redan ligger i boxen.</span></div>
+        <div class="field"><label for="catOwner">Ägare</label><select class="inp" id="catOwner"><option value="">Gemensamt</option>${S.members.filter(x=>x.active).map(x=>`<option value="${esc(x.id)}" ${x.id===S.me.id?"selected":""}>${esc(x.name)}</option>`).join("")}</select></div>`
+        :`<p class="muted" style="margin:0">Välj storlek för att se färgerna.</p>`}`;
+    $("#catSave").disabled = !v || !C.cols.size;
+    $("#catSave").textContent = C.cols.size ? `Lägg i boxen (${C.cols.size})` : "Lägg i boxen";
+    $$("#catBody [data-cm]").forEach(b=>b.onclick=()=>{ C.m=+b.dataset.cm; C.v=null; C.cols.clear(); draw(); });
+    $$("#catBody [data-cv]").forEach(b=>b.onclick=()=>{ C.v=+b.dataset.cv; C.cols.clear(); draw(); });
+    $$("#catBody [data-cc]").forEach(b=>b.onclick=()=>{ const c=b.dataset.cc; C.cols.has(c)?C.cols.delete(c):C.cols.add(c); draw(); });
+  };
+  openOverlay(`<div class="sheet-head"><h2>Från katalogen</h2><button class="x" data-close aria-label="Stäng">${I.x}</button></div>
+    <div class="form"><div id="catBody" style="display:grid;gap:18px"></div><div class="err" id="catErr" role="alert"></div>
+    <div class="form-actions"><button type="button" class="btn ghost" data-close>Avbryt</button><button type="button" class="btn primary" id="catSave" disabled>Lägg i boxen</button></div></div>`);
+  draw();
+  $("#catSave").onclick = async () => {
+    const m = CATALOG[C.m], v = m.variants[C.v], btn=$("#catSave"); btn.disabled=true; btn.innerHTML=`<span class="spin"></span> Sparar…`;
+    const owner = $("#catOwner")?.value || null; let n=0;
+    try{
+      for (const col of C.cols){
+        const name = `${m.brand} ${m.model} ${v[0]} ${v[1]} · ${col}`;
+        if (findBaitByName(name)) continue;
+        await dbInsert("baits", { name, type:m.type, color:col, size_cm:v[2], weight_g:v[3], brand:m.brand, owner, note:`${m.model}, ${v[1]}. Från katalogen.` }); n++;
+      }
+      closeOverlay(); render(); toast(`${n} ${n===1?"bete":"beten"} lagda i boxen`);
+    }catch(ex){ $("#catErr").textContent=errText(ex); btn.disabled=false; btn.textContent="Lägg i boxen"; }
+  };
+}
 const COLORS = ["Röd","Orange","Chartreuse","Vit","Svart","Guld","Silver","Firetiger","Motor oil","Naturfärg"];
 const PCOLORS = ["var(--p1)","var(--p2)","var(--p3)","var(--p4)"];
 const LAKE_RADIUS_KM = 2.5;
@@ -837,7 +883,7 @@ function renderBaits(){
   return `<div class="view"><div class="section-head"><h2>Betesboxen</h2><span class="muted num">${S.baits.length} beten · ${used.size} har tagit fisk</span></div>
     <div style="display:flex;gap:10px;flex-wrap:wrap"><input class="inp" id="bq" type="search" placeholder="Sök namn, färg, märke" value="${esc(S.baitQ)}" style="flex:1 1 200px">
       <select class="inp" id="bsort" style="flex:0 1 190px" aria-label="Sortera"><option value="catches" ${S.baitSort==="catches"?"selected":""}>Flest fångster</option><option value="recent" ${S.baitSort==="recent"?"selected":""}>Senast fiskat</option><option value="name" ${S.baitSort==="name"?"selected":""}>Namn</option></select>
-      <button class="btn primary" data-new-bait>＋ Nytt bete</button></div>
+      <button class="btn" data-catalog>＋ Från katalog</button><button class="btn primary" data-new-bait>＋ Nytt bete</button></div>
     ${types.length>1?`<div class="seg" role="group" aria-label="Filtrera på typ"><button class="chip small" data-bt="all" aria-pressed="${S.baitType==="all"}">Alla typer</button>${types.map(t=>`<button class="chip small" data-bt="${esc(t)}" aria-pressed="${S.baitType===t}">${esc(t)}</button>`).join("")}</div>`:""}
     <div id="baitListBox">${baitListHtml()}</div></div>`;
 }
@@ -1083,6 +1129,7 @@ function bindView(){
   $$("#main [data-open]").forEach(b=>b.onclick=()=>openDetail(b.dataset.open));
   $$("#main [data-new]").forEach(b=>b.onclick=()=>openForm());
   $$("#main [data-new-bait]").forEach(b=>b.onclick=()=>openBaitForm());
+  $$("#main [data-catalog]").forEach(b=>b.onclick=()=>openCatalog());
   $$("#main [data-trip-start]").forEach(b=>b.onclick=()=>startTrip());
   $$("#main [data-trip-end]").forEach(b=>b.onclick=()=>endTrip(b.dataset.tripEnd));
   $$("#main [data-trip-open]").forEach(b=>b.onclick=()=>openTrip(b.dataset.tripOpen));
