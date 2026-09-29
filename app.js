@@ -140,7 +140,8 @@ const invalidate = () => { S._hours = null; S._feats = null; };
 // ---------- format ----------
 const fmt1 = (n) => (Math.round(n*10)/10).toLocaleString("sv-SE",{maximumFractionDigits:1});
 const fmtDelta = (n, unit) => n==null ? "–" : (n>0?"+":n<0?"−":"±")+fmt1(Math.abs(n))+" "+unit;
-const fmtKg = (kg) => kg == null || kg === "" ? "" : (kg < 1 ? Math.round(kg*1000)+" g" : Number(kg).toLocaleString("sv-SE",{maximumFractionDigits:2})+" kg");
+// Fiskvikt visas i gram (lagras som kg i databasen).
+const fmtKg = (kg) => kg == null || kg === "" ? "" : Math.round(Number(kg)*1000).toLocaleString("sv-SE")+" g";
 const fmtDate = (iso) => { const d = new Date(iso); return d.toLocaleDateString("sv-SE",{day:"numeric",month:"short"}) + " " + d.toLocaleTimeString("sv-SE",{hour:"2-digit",minute:"2-digit"}); };
 const fmtTime = (ms) => new Date(ms).toLocaleTimeString("sv-SE",{hour:"2-digit",minute:"2-digit"});
 const fmtDay = (ms) => new Date(ms).toLocaleDateString("sv-SE",{weekday:"short",day:"numeric",month:"short"});
@@ -857,7 +858,7 @@ function download(name, text, type){
 function exportData(kind){
   const day=new Date().toISOString().slice(0,10);
   if (kind==="json"){ download(`fangstboken-${day}.json`, JSON.stringify({ exportedAt:new Date().toISOString(), members:S.members, lakes:S.lakes, baits:S.baits, trips:S.trips, catches:S.catches }, null, 1), "application/json"); return; }
-  const cols=[["Tid",c=>c.time],["Fiskare",c=>member(c.member_id)?.name],["Art",c=>c.species],["Vikt kg",c=>c.weight_kg],["Längd cm",c=>c.length_cm],["Vatten",c=>c.lake_name],["Bete",c=>baitName(c)],["Teknik",c=>c.technique],["Återutsatt",c=>c.released?"ja":"nej"],["Vattentemp",c=>c.water_temp_c],
+  const cols=[["Tid",c=>c.time],["Fiskare",c=>member(c.member_id)?.name],["Art",c=>c.species],["Vikt g",c=>c.weight_kg!=null?Math.round(c.weight_kg*1000):null],["Längd cm",c=>c.length_cm],["Vatten",c=>c.lake_name],["Bete",c=>baitName(c)],["Teknik",c=>c.technique],["Återutsatt",c=>c.released?"ja":"nej"],["Vattentemp",c=>c.water_temp_c],
     ["Lufttemp",c=>c.weather?.tempC],["Lufttryck",c=>c.weather?.pressure],["Tryck 3h",c=>c.weather?.pressureDelta3h],["Tryck 24h",c=>c.weather?.pressureDelta24h],["Vind m/s",c=>c.weather?.windMs],["Vindriktning",c=>c.weather?.windDir],["Moln %",c=>c.weather?.cloudPct],["Nederbörd mm",c=>c.weather?.precipMm],["Ljus",c=>c.light],["Månfas",c=>c.moon?.phase],["Lat",c=>c.lat],["Lon",c=>c.lon],["Anteckning",c=>c.note]];
   const q=v=>{ if(v==null) return ""; const s=String(typeof v==="number"?String(v).replace(".",","):v); return /[;"\n]/.test(s)?`"${s.replace(/"/g,'""')}"`:s; };
   download(`fangster-${day}.csv`, "﻿"+[cols.map(c=>c[0]).join(";"), ...S.catches.map(c=>cols.map(([,f])=>q(f(c))).join(";"))].join("\n"), "text/csv;charset=utf-8");
@@ -1018,7 +1019,7 @@ function openForm(edit=null){
       <div class="auto" id="auto"></div></div>
     <div class="field"><span class="label">Art</span><div class="chips" id="spChips">${sp.slice(0,9).map(s=>`<button type="button" class="chip" data-v="${esc(s)}" aria-pressed="${F.species===s}">${esc(s)}</button>`).join("")}</div>
       <input class="inp" id="spOther" list="spList" placeholder="Annan art" value="${esc(sp.slice(0,9).includes(F.species)?"":F.species)}"><datalist id="spList">${sp.map(s=>`<option value="${esc(s)}">`).join("")}</datalist></div>
-    <div class="row2"><div class="field"><label for="fKg">Vikt (kg)</label><input class="inp num" id="fKg" inputmode="decimal" placeholder="0,85" value="${edit?.weight_kg!=null?String(edit.weight_kg).replace(".",","):""}"></div>
+    <div class="row2"><div class="field"><label for="fKg">Vikt (g)</label><input class="inp num" id="fKg" inputmode="numeric" placeholder="850" value="${edit?.weight_kg!=null?Math.round(edit.weight_kg*1000):""}"></div>
       <div class="field"><label for="fCm">Längd (cm)</label><input class="inp num" id="fCm" inputmode="decimal" placeholder="42" value="${edit?.length_cm!=null?String(edit.length_cm).replace(".",","):""}"></div></div>
     <div class="field"><label for="fBait">Bete</label><input class="inp" id="fBait" list="baitList" placeholder="Sök i betesboxen eller skriv nytt" value="${esc(edit?baitName(edit):"")}" autocomplete="off">
       <datalist id="baitList">${S.baits.map(b=>`<option value="${esc(b.name)}" label="${esc(baitDesc(b))}">`).join("")}</datalist>
@@ -1091,7 +1092,8 @@ function openForm(edit=null){
     e.preventDefault(); if(F.saving) return; const err=$("#fErr"); err.textContent="";
     const species=F.species || $("#spOther").value.trim(); if (!species){ err.textContent="Välj vilken art det är."; return; }
     const pn=(id)=>{ const v=$(id).value.replace(",",".").trim(); return v?Number(v):null; };
-    const weight_kg=pn("#fKg"), length_cm=pn("#fCm"), water_temp_c=pn("#fWater");
+    const weight_g=pn("#fKg"), length_cm=pn("#fCm"), water_temp_c=pn("#fWater");
+    const weight_kg = weight_g==null ? null : Math.round(weight_g)/1000;
     if ((weight_kg!=null && !(weight_kg>0 && weight_kg<200)) || (length_cm!=null && !(length_cm>0 && length_cm<400))){ err.textContent="Kontrollera vikt och längd, använd bara siffror."; return; }
     if (water_temp_c!=null && !(water_temp_c>=-2 && water_temp_c<=35)){ err.textContent="Vattentemperaturen ska vara ett tal mellan −2 och 35 °C."; return; }
     const t=$("#fTime").value?new Date($("#fTime").value):new Date(); if (isNaN(t)){ err.textContent="Ange en giltig tid."; return; }
