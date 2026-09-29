@@ -861,7 +861,7 @@ function openDetail(id){
 function recentBaits(){ return count(S.catches.filter(c=>c.member_id===S.me.id).slice(0,60),baitName).slice(0,6).map(x=>x[0]); }
 function topSpecies(){ return [...new Set([...count(S.catches,c=>c.species).map(x=>x[0]),...SPECIES])]; }
 function openForm(edit=null){
-  const F={ file:null, lat:edit?.lat??null, lon:edit?.lon??null, exifTime:false, exifGps:false, species:edit?.species||"", technique:edit?.technique||"", saving:false, newBaitType:"" };
+  const F={ file:null, lat:edit?.lat??null, lon:edit?.lon??null, exifTime:false, exifGps:false, phone:null, phoneGps:false, lakeTouched:!!edit, species:edit?.species||"", technique:edit?.technique||"", saving:false, newBaitType:"" };
   const lastMine=S.catches.find(c=>c.member_id===S.me.id), baits=recentBaits(), sp=topSpecies();
   const host=openOverlay(`<div class="sheet-head"><h2>${edit?"Redigera fångst":"Ny fångst"}</h2><button class="x" data-close aria-label="Stäng">${I.x}</button></div>
   <form class="form" id="cf" novalidate>
@@ -887,18 +887,31 @@ function openForm(edit=null){
     <div class="form-actions"><button type="button" class="btn ghost" data-close>Avbryt</button><button type="submit" class="btn primary" id="fSave">${edit?"Spara ändringar":"Spara fångst"}</button></div>
   </form>`);
   hydratePhotos(host);
+  const ic=(svg)=>svg.replace("<svg","<svg width=13 height=13");
   const auto=()=>{ const bits=[];
-    if (F.file) bits.push(F.exifTime?`<span>${I.clock.replace("<svg","<svg width=13 height=13")} Tid från bilden</span>`:`<span class="off">Ingen tid i bilden</span>`);
-    if (F.file) bits.push(F.exifGps?`<span>${I.pin.replace("<svg","<svg width=13 height=13")} Position från bilden</span>`:`<span class="off">Ingen GPS i bilden</span>`);
+    if (F.file) bits.push(F.exifTime?`<span>${ic(I.clock)} Tid från bilden</span>`:`<span class="off">Ingen tid i bilden</span>`);
+    if (F.exifGps) bits.push(`<span>${ic(I.pin)} Position från bilden</span>`);
+    else if (F.phoneGps) bits.push(`<span>${ic(I.pin)} Position från telefonen</span>`);
+    else if (F.file) bits.push(`<span class="off">Ingen GPS i bilden</span>`);
     $("#auto").innerHTML=bits.join(""); };
+  // iPhone skickar oftast inte med bildens plats till webbsidor. Är fångsten från just nu används telefonens position i stället.
+  const nearNow=()=>{ const v=$("#fTime").value; if(!v) return true; return Math.abs(new Date(v).getTime()-Date.now()) <= 45*60000; };
+  const applyPhone=()=>{
+    if (edit || F.exifGps) return;
+    const use = !!F.phone && nearNow();
+    if (use && !F.phoneGps){ F.lat=F.phone.lat; F.lon=F.phone.lon; F.phoneGps=true; auto(); if (!F.lakeTouched) matchLake(); }
+    else if (!use && F.phoneGps){ F.lat=null; F.lon=null; F.phoneGps=false; auto(); if (!F.lakeTouched) matchLake(); }
+  };
   const setLake=()=>{ const sel=$("#fLake"), nw=$("#fLakeNew"); nw.hidden = sel.value!=="__new"; };
   const matchLake=()=>{ const hint=$("#lakeHint");
-    if (F.lat==null){ hint.textContent=F.file?"Bilden saknar position. Välj vatten själv, så används vattnets position.":""; return; }
+    if (F.lat==null){ hint.textContent=F.file?"Ingen position. Välj vatten själv, så används vattnets position.":""; return; }
     const m=nearestLake(F.lat,F.lon);
     if (m){ $("#fLake").value=m.lake.id; hint.textContent=`Känns igen: ${m.lake.name} (${m.d<1?Math.round(m.d*1000)+" m":fmt1(m.d)+" km"} bort)`; }
     else { $("#fLake").value="__new"; hint.textContent="Nytt ställe. Skriv namnet en gång så känns det igen nästa gång."; }
     setLake(); };
-  $("#fLake").onchange=setLake;
+  $("#fLake").onchange=()=>{ F.lakeTouched=true; setLake(); };
+  $("#fTime").addEventListener("change", applyPhone);
+  if (!edit) getPosition().then(p=>{ F.phone=p; if ($("#cf")) applyPhone(); });
   const chipGroup=(id,key)=>$(id).querySelectorAll("[data-v]").forEach(b=>b.onclick=()=>{ F[key]=F[key]===b.dataset.v?"":b.dataset.v; $(id).querySelectorAll("[data-v]").forEach(x=>x.setAttribute("aria-pressed",x.dataset.v===F[key])); if(key==="species") $("#spOther").value=""; });
   chipGroup("#spChips","species"); chipGroup("#teChips","technique");
   $("#spOther").oninput=(e)=>{ F.species=e.target.value.trim(); $("#spChips").querySelectorAll("[data-v]").forEach(x=>x.setAttribute("aria-pressed",x.dataset.v===F.species)); };
@@ -910,16 +923,17 @@ function openForm(edit=null){
   if (edit) $("#lakeHint").textContent=edit.lat!=null?`Position ${Number(edit.lat).toFixed(3)}, ${Number(edit.lon).toFixed(3)}`:"";
   $("#photo").onchange=async(e)=>{
     const file=e.target.files?.[0]; if(!file) return;
-    F.file=file; F.exifTime=false; F.exifGps=false;
+    F.file=file; F.exifTime=false; if (F.exifGps){ F.exifGps=false; F.lat=null; F.lon=null; }
     $("#drop").querySelector(".hint")?.remove(); $("#drop").querySelector("img")?.remove();
     const img=document.createElement("img"); img.alt=""; img.src=URL.createObjectURL(file); $("#drop").prepend(img);
     try{ if (window.exifr){
       const meta=await window.exifr.parse(file,{gps:true,pick:["DateTimeOriginal","CreateDate","latitude","longitude","GPSLatitude","GPSLongitude","GPSLatitudeRef","GPSLongitudeRef"]});
       const t=meta?.DateTimeOriginal||meta?.CreateDate;
       if (t instanceof Date && !isNaN(t)){ $("#fTime").value=toLocalInput(t); F.exifTime=true; }
-      if (meta && typeof meta.latitude==="number" && typeof meta.longitude==="number"){ F.lat=meta.latitude; F.lon=meta.longitude; F.exifGps=true; }
+      if (meta && typeof meta.latitude==="number" && typeof meta.longitude==="number"){ F.lat=meta.latitude; F.lon=meta.longitude; F.exifGps=true; F.phoneGps=false; }
     } }catch(err){}
-    auto(); matchLake();
+    if (!F.exifGps){ F.phoneGps=false; if (!edit){ F.lat=null; F.lon=null; } applyPhone(); }
+    auto(); if (F.exifGps || !F.lakeTouched) matchLake();
   };
   $("#cf").onsubmit=async(e)=>{
     e.preventDefault(); if(F.saving) return; const err=$("#fErr"); err.textContent="";
@@ -935,11 +949,11 @@ function openForm(edit=null){
     try{
       let photo=edit?.photo||null;
       if (F.file){ btn.innerHTML=`<span class="spin"></span> Laddar upp bild…`; photo=await S.api.upload(await shrink(F.file)); }
-      const lake = await resolveLake(lakeSel, newName, F.exifGps?{lat:F.lat,lon:F.lon}:null);
+      const lake = await resolveLake(lakeSel, newName, (F.exifGps||F.phoneGps)?{lat:F.lat,lon:F.lon}:null);
       const baitText=$("#fBait").value.trim(); let bait_id=null, bait=baitText;
       if (baitText){ const b=findBaitByName(baitText);
         if (b){ bait_id=b.id; bait=b.name; } else { const nb=await dbInsert("baits",{ name:baitText, type:F.newBaitType||"Övrigt", owner:$("#fAngler").value }); bait_id=nb.id; } }
-      let lat=F.lat, lon=F.lon, pos_source=F.exifGps?"photo":(edit?.pos_source||null);
+      let lat=F.lat, lon=F.lon, pos_source=F.exifGps?"photo":F.phoneGps?"phone":(edit?.pos_source||null);
       if (lat==null && lake?.lat!=null){ lat=lake.lat; lon=lake.lon; pos_source="lake"; }
       const member_id=$("#fAngler").value, timeISO=t.toISOString();
       const trip = tripFor(member_id, t.getTime());
