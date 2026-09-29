@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="sv">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Fångstboken</title>
+<meta name="theme-color" content="#EDF1EE" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#0B181A" media="(prefers-color-scheme: dark)">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Fångstboken">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=Barlow:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="styles.css">
+<script src="https://cdn.jsdelivr.net/npm/exifr@7.1.3/dist/full.umd.js"></script>
+<script src="config.js"></script>
+</head>
+<body>
+<header class="top">
+  <div class="top-in">
+    <div class="brand">
+      <svg viewBox="0 0 32 32" aria-hidden="true"><circle cx="16" cy="16" r="15" fill="var(--accent)"/><path d="M6 16c3.5-4.5 8-6 12-4.2 1.6.7 3 1.9 4.2 3.2l3.8-3v8l-3.8-3c-1.2 1.3-2.6 2.5-4.2 3.2C14 22 9.5 20.5 6 16z" fill="var(--accent-ink)"/><circle cx="11" cy="15" r="1.3" fill="var(--accent)"/></svg>
+      <div><h1>Fångstboken</h1><small>Loggbok för gänget</small></div>
+    </div>
+    <button class="me-btn" id="meBtn" hidden></button>
+  </div>
+</header>
+
+<div class="shell">
+  <nav class="nav" aria-label="Huvudmeny" id="nav" hidden>
+    <div class="nav-in">
+      <button class="tab" data-tab="feed"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="3"/><path d="M3 15l5-4 4 3 3-2 6 4"/><circle cx="16" cy="9" r="1.6"/></svg><span>Fångster</span></button>
+      <button class="tab" data-tab="trips"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 17c2.5 0 2.5-2 5-2s2.5 2 5 2 2.5-2 5-2 2.5 2 3 2"/><path d="M12 3v9M12 3l5 3-5 3"/></svg><span>Turer</span></button>
+      <button class="fab" id="fab" aria-label="Ny fångst"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg></button>
+      <button class="tab" data-tab="stats"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M4 20V11M10 20V5M16 20v-6M22 20H2"/></svg><span>Statistik</span></button>
+      <button class="tab more-only" data-tab="more"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="5" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="19" cy="12" r="1.6"/></svg><span>Mer</span></button>
+      <button class="tab wide-only" data-tab="baits"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12c3-4 7-5.5 11-4.5l4-3v15l-4-3C10 17.5 6 16 3 12z"/><circle cx="8" cy="11.5" r="1"/></svg><span>Beten</span></button>
+      <button class="tab wide-only" data-tab="lakes"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 21s-7-6.2-7-11.5A7 7 0 0112 2.5a7 7 0 017 7C19 14.8 12 21 12 21z"/><path d="M8.5 10.5c1.2-.9 2.3-.9 3.5 0s2.3.9 3.5 0"/></svg><span>Vatten</span></button>
+      <button class="tab wide-only" data-tab="gang"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="9" cy="8" r="3.2"/><path d="M3 20c.6-3.6 3-5.5 6-5.5s5.4 1.9 6 5.5"/><circle cx="17" cy="9" r="2.4"/><path d="M16 14.6c2.6.1 4.4 1.8 5 5.4"/></svg><span>Gänget</span></button>
+    </div>
+  </nav>
+  <main class="wrap" id="main"><div class="view"><div class="banner"><span class="spin"></span> Startar…</div></div></main>
+</div>
+
+<div id="overlayHost"></div>
+<div id="tipHost"></div>
+<div id="toastHost"></div>
+<script type="module" src="app.js"></script>
+</body>
+</html>
