@@ -36,7 +36,10 @@ async function makeSupabaseApi(cfg){
     },
     async insert(table, row){ return chk(await sb.from(table).insert(row).select().single()); },
     async update(table, id, patch){ return chk(await sb.from(table).update(patch).eq("id", id).select().single()); },
-    async remove(table, id){ chk(await sb.from(table).delete().eq("id", id)); },
+    async remove(table, id){
+      const d = chk(await sb.from(table).delete().eq("id", id).select("id"));
+      if (!d || !d.length) throw new Error("NOT_ALLOWED");
+    },
     subscribe(cb){ sb.channel("fangstboken").on("postgres_changes", { event: "*", schema: "public" }, p => cb(p.table)).subscribe(); },
     async upload(blob){
       const path = `${new Date().toISOString().slice(0,7)}/${crypto.randomUUID()}.jpg`;
@@ -99,7 +102,10 @@ const fmtDur = (ms) => { const m=Math.round(ms/60000), h=Math.floor(m/60); retur
 const toLocalInput = (d) => { const p=n=>String(n).padStart(2,"0"); return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`; };
 const windDirTxt = (deg) => deg==null ? "" : ["N","NO","O","SO","S","SV","V","NV"][Math.round(deg/45)%8];
 function toast(msg){ const h=$("#toastHost"); h.innerHTML=`<div class="toast" role="status">${esc(msg)}</div>`; clearTimeout(toast.t); toast.t=setTimeout(()=>h.innerHTML="",2800); }
-const errText = (e) => /network|fetch/i.test(e?.message||"") ? "Ingen kontakt med servern. Kontrollera uppkopplingen." : (e?.message || "Något gick fel.");
+const errText = (e) => e?.message==="NOT_ALLOWED" ? "Du kan bara ta bort det du själv har lagt in." : /network|fetch/i.test(e?.message||"") ? "Ingen kontakt med servern. Kontrollera uppkopplingen." : (e?.message || "Något gick fel.");
+// Samma regler som i databasen: egna saker, eller allt om man är admin.
+const canDeleteCatch = (c) => S.me?.is_admin || c.member_id === S.me?.id || c.created_by === S.me?.id;
+const canDeleteLake = (l) => S.me?.is_admin || l.created_by === S.me?.id;
 
 // ---------- ikoner ----------
 const I = {
@@ -692,9 +698,9 @@ function openLake(id){
       <section class="panel"><h3>Position</h3><p class="sub">Används för att känna igen vattnet och hämta väder när en fångst saknar egen position.</p>
         <p style="margin:0" id="lkPos">${l.lat!=null?`<a href="https://www.google.com/maps?q=${l.lat},${l.lon}" target="_blank" rel="noopener" style="color:var(--accent)">${Number(l.lat).toFixed(4)}, ${Number(l.lon).toFixed(4)}</a>`:"Ingen position sparad."}</p>
         <div><button class="btn" id="lkHere">Använd min position nu</button></div></section>
-      ${others.length?`<section class="panel"><h3>Slå ihop</h3><p class="sub">Har samma vatten sparats två gånger? Flytta fångsterna och turerna härifrån till det andra vattnet och ta bort det här.</p>
+      ${others.length&&canDeleteLake(l)?`<section class="panel"><h3>Slå ihop</h3><p class="sub">Har samma vatten sparats två gånger? Flytta fångsterna och turerna härifrån till det andra vattnet och ta bort det här.</p>
         <div style="display:flex;gap:10px;flex-wrap:wrap"><select class="inp" id="lkTo" style="flex:1 1 180px"><option value="">Välj vatten</option>${others.map(o=>`<option value="${esc(o.id)}">${esc(o.name)}</option>`).join("")}</select><button class="btn" id="lkMerge">Slå ihop</button></div></section>`:""}
-      <div><button class="btn danger ghost" id="lkDel">Ta bort vattnet</button></div>
+      ${canDeleteLake(l)?`<div><button class="btn danger ghost" id="lkDel">Ta bort vattnet</button></div>`:`<p class="muted" style="margin:0;font-size:13px">Bara ${esc(member(l.created_by)?.name||"den som lade till vattnet")} eller admin kan slå ihop eller ta bort det.</p>`}
       <div id="lkConfirm"></div>
     </div>`);
   const busy=(btn,on,txt)=>{ btn.disabled=on; if(on) btn.innerHTML=`<span class="spin"></span> Vänta…`; else btn.textContent=txt; };
@@ -716,7 +722,7 @@ function openLake(id){
         if (to.lat==null && l.lat!=null) await dbUpdate("lakes", to.id, { lat:l.lat, lon:l.lon });
         await dbRemove("lakes", id); closeOverlay(); render(); toast(`Ihopslaget med ${to.name}`); }
       catch(ex){ toast(errText(ex)); busy($("#lkYes"),false,"Slå ihop"); } }; };
-  $("#lkDel").onclick=()=>{
+  if ($("#lkDel")) $("#lkDel").onclick=()=>{
     $("#lkConfirm").innerHTML=`<div class="banner warn" style="display:grid;gap:10px"><span>Ta bort <b>${esc(l.name)}</b>?${cs.length||ts.length?` ${cs.length} fångster och ${ts.length} turer finns kvar, men kopplas loss från vattnet. Fångsterna behåller namnet.`:""}</span><div style="display:flex;gap:10px"><button class="btn danger" id="lkYes">Ta bort</button><button class="btn ghost" id="lkNo">Avbryt</button></div></div>`;
     $("#lkNo").onclick=()=>$("#lkConfirm").innerHTML="";
     $("#lkYes").onclick=async()=>{ busy($("#lkYes"),true);
@@ -890,12 +896,12 @@ function openDetail(id){
   const host=openOverlay(`<div class="sheet-head"><h2>${esc(c.species)}${c.weight_kg?` · ${esc(fmtKg(c.weight_kg))}`:""}</h2><button class="x" data-close aria-label="Stäng">${I.x}</button></div>
     <div style="display:grid;gap:16px">${photoImg(c.photo, c.species, "detail-img")}${c.note?`<p style="margin:0">${esc(c.note)}</p>`:""}
       <dl class="kv">${rows.map(([k,v])=>`<dt>${k}</dt><dd>${v}</dd>`).join("")}</dl>
-      <div style="display:flex;gap:10px;flex-wrap:wrap"><button class="btn" id="dEdit">Redigera</button><button class="btn danger ghost" id="dDel">Ta bort</button></div><div id="dConfirm"></div></div>`);
+      <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center"><button class="btn" id="dEdit">Redigera</button>${canDeleteCatch(c)?`<button class="btn danger ghost" id="dDel">Ta bort</button>`:`<span class="muted" style="font-size:13px">Bara ${esc(m?.name||"den som fångade den")} eller admin kan ta bort fångsten.</span>`}</div><div id="dConfirm"></div></div>`);
   hydratePhotos(host);
   $("#dEdit").onclick=()=>openForm(c);
   host.querySelectorAll("[data-bait-open]").forEach(b=>b.onclick=()=>openBait(b.dataset.baitOpen));
   host.querySelectorAll("[data-trip-open]").forEach(b=>b.onclick=()=>openTrip(b.dataset.tripOpen));
-  $("#dDel").onclick=()=>{
+  if ($("#dDel")) $("#dDel").onclick=()=>{
     $("#dConfirm").innerHTML=`<div class="banner warn" style="display:grid;gap:10px"><span>Ta bort fångsten för alla fiskekompisar? Det går inte att ångra.</span><div style="display:flex;gap:10px"><button class="btn danger" id="dYes">Ta bort</button><button class="btn ghost" id="dNo">Avbryt</button></div></div>`;
     $("#dNo").onclick=()=>$("#dConfirm").innerHTML="";
     $("#dYes").onclick=async()=>{ try{ await dbRemove("catches", c.id); if (c.photo && !S.catches.some(x=>x.photo===c.photo)) S.api.removePhoto(c.photo).catch(()=>{}); closeOverlay(); render(); toast("Fångsten är borttagen"); }catch(e){ toast(errText(e)); } };
@@ -1007,7 +1013,7 @@ function openForm(edit=null){
         time:timeISO, lat, lon, pos_source, lake_id:lake?.id||null, lake_name:lake?.name||null, photo, trip_id: trip?.id || null,
         light: A.light(t,lat,lon), moon: A.moonPhase(t) };
       if (moved){ btn.innerHTML=`<span class="spin"></span> Hämtar väder…`; Object.assign(row, await weatherForCatch(row).catch(()=>({ weather:null, weather_status: lat!=null?"pending":"nopos" }))); }
-      if (edit) await dbUpdate("catches", edit.id, row); else await dbInsert("catches", row);
+      if (edit) await dbUpdate("catches", edit.id, row); else await dbInsert("catches", { ...row, created_by: S.me.id });
       if (edit?.photo && photo!==edit.photo && !S.catches.some(x=>x.photo===edit.photo)) S.api.removePhoto(edit.photo).catch(()=>{});
       if (trip && trip.lat==null && lat!=null) dbUpdate("trips", trip.id, { lat, lon }).catch(()=>{});
       closeOverlay(); if (S.tab!=="trips") S.tab="feed"; render(); toast(edit?"Ändringarna är sparade":`${species} sparad`);
