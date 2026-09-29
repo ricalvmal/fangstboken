@@ -244,6 +244,18 @@ async function shrink(file){
   }catch(e){ return file; } finally { URL.revokeObjectURL(url); }
 }
 
+// Bildväljare med två knappar: kameran direkt och galleriet (Android visar annars bara galleriet).
+const GALLERY_ICON = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="3"/><path d="M3 15l5-4 4 3 3-2 6 4"/><circle cx="16" cy="9" r="1.6"/></svg>`;
+function photoPicker(id, current, small=false){
+  return `<div class="picker${small?" small":""}"><div class="pick-prev" id="${id}Prev">${current?photoImg(current):`<span class="muted">${small?"Ingen bild":"Ingen bild än"}</span>`}</div>
+    <div class="photo-btns"><label class="btn" for="${id}Cam">${I.cam.replace("<svg","<svg width=18 height=18")} Ta bild</label><label class="btn" for="${id}Lib">${GALLERY_ICON} Välj bild</label></div>
+    <input type="file" id="${id}Cam" accept="image/*" capture="environment" hidden><input type="file" id="${id}Lib" accept="image/*" hidden></div>`;
+}
+function bindPicker(id, onFile){
+  const h=(e)=>{ const f=e.target.files?.[0]; if(!f) return; const p=$("#"+id+"Prev"); p.innerHTML=""; const img=document.createElement("img"); img.alt=""; img.src=URL.createObjectURL(f); p.appendChild(img); onFile(f); };
+  $("#"+id+"Cam").onchange=h; $("#"+id+"Lib").onchange=h;
+}
+
 // ---------- väder ----------
 function tripFor(memberId, ms){
   return S.trips.find(t => t.member_id === memberId && Date.parse(t.started_at) <= ms + 5*60000 && (t.ended_at ? Date.parse(t.ended_at) + 5*60000 : Date.now() + H) >= ms);
@@ -823,14 +835,14 @@ function openBaitForm(edit=null){
     <div class="row2"><div class="field"><label for="bSize">Storlek (cm)</label><input class="inp num" id="bSize" inputmode="decimal" value="${edit?.size_cm??""}" placeholder="7"></div><div class="field"><label for="bW">Vikt (g)</label><input class="inp num" id="bW" inputmode="decimal" value="${edit?.weight_g??""}" placeholder="14"></div></div>
     <div class="field"><label for="bBrand">Märke</label><input class="inp" id="bBrand" maxlength="40" value="${esc(edit?.brand||"")}" placeholder="t.ex. Savage Gear"></div>
     <div class="field"><label for="bOwner">Ägare</label><select class="inp" id="bOwner"><option value="">Gemensamt</option>${S.members.filter(m=>m.active).map(m=>`<option value="${esc(m.id)}" ${m.id===(edit?edit.owner:S.me.id)?"selected":""}>${esc(m.name)}</option>`).join("")}</select></div>
-    <div class="field"><label for="bPhoto">Bild</label><input class="inp" type="file" id="bPhoto" accept="image/*"></div>
+    <div class="field"><span class="label">Bild</span>${photoPicker("bp", edit?.photo)}</div>
     <div class="field"><label for="bNote">Anteckning</label><textarea class="inp" id="bNote" rows="2" placeholder="Rigg, krokstorlek, hur den ska gå…">${esc(edit?.note||"")}</textarea></div>
     <div class="err" id="bErr" role="alert"></div>
     <div class="form-actions"><button type="button" class="btn ghost" data-close>Avbryt</button><button type="submit" class="btn primary" id="bSave">${edit?"Spara ändringar":"Lägg i boxen"}</button></div>
   </form>`);
   $("#bType").querySelectorAll("[data-v]").forEach(b=>b.onclick=()=>{ F.type=F.type===b.dataset.v?"":b.dataset.v; $("#bType").querySelectorAll("[data-v]").forEach(x=>x.setAttribute("aria-pressed",x.dataset.v===F.type)); });
   $$("[data-col]").forEach(b=>b.onclick=()=>{ $("#bColor").value=b.dataset.col; });
-  $("#bPhoto").onchange=(e)=>{ F.file=e.target.files?.[0]||null; };
+  bindPicker("bp", f=>{ F.file=f; }); hydratePhotos($("#overlayHost"));
   $("#bf").onsubmit=async(e)=>{
     e.preventDefault(); if(F.saving) return; const err=$("#bErr"); err.textContent="";
     const name=$("#bName").value.trim(); if (!name){ err.textContent="Ge betet ett namn."; return; }
@@ -927,7 +939,8 @@ function openForm(edit=null){
     <div class="field"><label for="fBait">Bete</label><input class="inp" id="fBait" list="baitList" placeholder="Sök i betesboxen eller skriv nytt" value="${esc(edit?baitName(edit):"")}" autocomplete="off">
       <datalist id="baitList">${S.baits.map(b=>`<option value="${esc(b.name)}" label="${esc(baitDesc(b))}">`).join("")}</datalist>
       ${baits.length?`<div class="chips">${lastMine&&baitName(lastMine)&&!edit?`<button type="button" class="chip small" data-bait="${esc(baitName(lastMine))}">Samma som sist: ${esc(baitName(lastMine))}</button>`:""}${baits.filter(b=>edit||b!==baitName(lastMine||{})).map(b=>`<button type="button" class="chip small" data-bait="${esc(b)}">${esc(b)}</button>`).join("")}</div>`:""}
-      <div id="newBaitBox" hidden style="display:grid;gap:8px"><span class="muted" style="font-size:13px">Nytt bete. Det läggs till i betesboxen. Vilken typ?</span><div class="chips" id="nbType">${BAIT_TYPES.map(t=>`<button type="button" class="chip small" data-v="${esc(t)}" aria-pressed="false">${esc(t)}</button>`).join("")}</div></div>
+      <div id="newBaitBox" hidden style="display:grid;gap:8px"><span class="muted" style="font-size:13px">Nytt bete. Det läggs till i betesboxen. Vilken typ?</span><div class="chips" id="nbType">${BAIT_TYPES.map(t=>`<button type="button" class="chip small" data-v="${esc(t)}" aria-pressed="false">${esc(t)}</button>`).join("")}</div>
+        <span class="muted" style="font-size:13px">Bild på betet (valfritt)</span>${photoPicker("nbp", null, true)}</div>
       <span class="muted" id="baitHint" style="font-size:13px"></span></div>
     <div class="field"><span class="label">Teknik</span><div class="chips" id="teChips">${TECH.map(t=>`<button type="button" class="chip small" data-v="${esc(t)}" aria-pressed="${F.technique===t}">${esc(t)}</button>`).join("")}</div></div>
     <div class="row2"><div class="field"><label for="fWater">Vattentemp (°C)</label><input class="inp num" id="fWater" inputmode="decimal" placeholder="14,5" value="${edit?.water_temp_c!=null?String(edit.water_temp_c).replace(".",","):""}"></div>
@@ -973,7 +986,7 @@ function openForm(edit=null){
   $("#fBait").oninput=baitCheck;
   host.querySelectorAll("[data-bait]").forEach(b=>b.onclick=()=>{ $("#fBait").value=b.dataset.bait; baitCheck(); });
   $("#nbType").querySelectorAll("[data-v]").forEach(b=>b.onclick=()=>{ F.newBaitType=F.newBaitType===b.dataset.v?"":b.dataset.v; $("#nbType").querySelectorAll("[data-v]").forEach(x=>x.setAttribute("aria-pressed",x.dataset.v===F.newBaitType)); });
-  baitCheck();
+  baitCheck(); bindPicker("nbp", f=>{ F.baitFile=f; });
   if (edit) $("#lakeHint").textContent=edit.lat!=null?`Position ${Number(edit.lat).toFixed(3)}, ${Number(edit.lon).toFixed(3)}`:"";
   const onPhoto=async(e)=>{
     const file=e.target.files?.[0]; if(!file) return;
@@ -1007,7 +1020,9 @@ function openForm(edit=null){
       const lake = await resolveLake(lakeSel, newName, (F.exifGps||F.phoneGps)?{lat:F.lat,lon:F.lon}:null);
       const baitText=$("#fBait").value.trim(); let bait_id=null, bait=baitText;
       if (baitText){ const b=findBaitByName(baitText);
-        if (b){ bait_id=b.id; bait=b.name; } else { const nb=await dbInsert("baits",{ name:baitText, type:F.newBaitType||"Övrigt", owner:$("#fAngler").value }); bait_id=nb.id; } }
+        if (b){ bait_id=b.id; bait=b.name; } else {
+          let bphoto=null; if (F.baitFile){ btn.innerHTML=`<span class="spin"></span> Laddar upp betesbild…`; bphoto=await S.api.upload(await shrink(F.baitFile)); }
+          const nb=await dbInsert("baits",{ name:baitText, type:F.newBaitType||"Övrigt", owner:$("#fAngler").value, photo:bphoto }); bait_id=nb.id; } }
       let lat=F.lat, lon=F.lon, pos_source=F.exifGps?"photo":F.phoneGps?"phone":(edit?.pos_source||null);
       if (lat==null && lake?.lat!=null){ lat=lake.lat; lon=lake.lon; pos_source="lake"; }
       const member_id=$("#fAngler").value, timeISO=t.toISOString();

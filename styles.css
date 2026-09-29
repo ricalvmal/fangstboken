@@ -330,3 +330,11 @@ img{max-width:100%}
 .photo-btns .btn{cursor:pointer}
 .photo-drop{min-height:140px}
 .field > label.photo-drop{font-family:var(--body);font-size:14px;font-weight:400;letter-spacing:0;text-transform:none;color:var(--muted)}
+
+/* Bildväljare för beten */
+.picker{display:grid;gap:10px}
+.pick-prev{border:2px dashed var(--line);border-radius:14px;background:var(--surface);min-height:110px;display:grid;place-items:center;overflow:hidden;font-size:14px}
+.pick-prev img{width:100%;max-height:240px;object-fit:cover;display:block}
+.picker.small{grid-template-columns:72px 1fr;align-items:center}
+.picker.small .pick-prev{min-height:72px;height:72px;width:72px;font-size:12px;text-align:center}
+.picker.small .pick-prev img{height:72px;max-height:none}
