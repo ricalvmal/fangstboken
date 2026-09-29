@@ -916,7 +916,10 @@ function openForm(edit=null){
   const lastMine=S.catches.find(c=>c.member_id===S.me.id), baits=recentBaits(), sp=topSpecies();
   const host=openOverlay(`<div class="sheet-head"><h2>${edit?"Redigera fångst":"Ny fångst"}</h2><button class="x" data-close aria-label="Stäng">${I.x}</button></div>
   <form class="form" id="cf" novalidate>
-    <div class="field"><label class="photo-drop" id="drop">${edit?.photo?photoImg(edit.photo,"","pv"):`<span class="hint">${I.cam}<b>Ta eller välj en bild</b><span>Tid och plats läses från fotot</span></span>`}<input type="file" id="photo" accept="image/*" aria-label="Bild på fångsten"></label><div class="auto" id="auto"></div></div>
+    <div class="field"><label class="photo-drop" id="drop" for="photoCam">${edit?.photo?photoImg(edit.photo,"","pv"):`<span class="hint">${I.cam}<b>Ta en bild</b><span>Tid och plats läses från fotot när det går</span></span>`}</label>
+      <div class="photo-btns"><label class="btn" for="photoCam">${I.cam.replace("<svg","<svg width=18 height=18")} Ta bild</label><label class="btn" for="photoLib"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="3"/><path d="M3 15l5-4 4 3 3-2 6 4"/><circle cx="16" cy="9" r="1.6"/></svg> Välj bild</label></div>
+      <input type="file" id="photoCam" accept="image/*" capture="environment" hidden aria-label="Ta bild med kameran"><input type="file" id="photoLib" accept="image/*" hidden aria-label="Välj bild ur galleriet">
+      <div class="auto" id="auto"></div></div>
     <div class="field"><span class="label">Art</span><div class="chips" id="spChips">${sp.slice(0,9).map(s=>`<button type="button" class="chip" data-v="${esc(s)}" aria-pressed="${F.species===s}">${esc(s)}</button>`).join("")}</div>
       <input class="inp" id="spOther" list="spList" placeholder="Annan art" value="${esc(sp.slice(0,9).includes(F.species)?"":F.species)}"><datalist id="spList">${sp.map(s=>`<option value="${esc(s)}">`).join("")}</datalist></div>
     <div class="row2"><div class="field"><label for="fKg">Vikt (kg)</label><input class="inp num" id="fKg" inputmode="decimal" placeholder="0,85" value="${edit?.weight_kg!=null?String(edit.weight_kg).replace(".",","):""}"></div>
@@ -972,7 +975,7 @@ function openForm(edit=null){
   $("#nbType").querySelectorAll("[data-v]").forEach(b=>b.onclick=()=>{ F.newBaitType=F.newBaitType===b.dataset.v?"":b.dataset.v; $("#nbType").querySelectorAll("[data-v]").forEach(x=>x.setAttribute("aria-pressed",x.dataset.v===F.newBaitType)); });
   baitCheck();
   if (edit) $("#lakeHint").textContent=edit.lat!=null?`Position ${Number(edit.lat).toFixed(3)}, ${Number(edit.lon).toFixed(3)}`:"";
-  $("#photo").onchange=async(e)=>{
+  const onPhoto=async(e)=>{
     const file=e.target.files?.[0]; if(!file) return;
     F.file=file; F.exifTime=false; if (F.exifGps){ F.exifGps=false; F.lat=null; F.lon=null; }
     $("#drop").querySelector(".hint")?.remove(); $("#drop").querySelector("img")?.remove();
@@ -986,6 +989,7 @@ function openForm(edit=null){
     if (!F.exifGps){ F.phoneGps=false; if (!edit){ F.lat=null; F.lon=null; } applyPhone(); }
     auto(); if (F.exifGps || !F.lakeTouched) matchLake();
   };
+  $("#photoCam").onchange=onPhoto; $("#photoLib").onchange=onPhoto;
   $("#cf").onsubmit=async(e)=>{
     e.preventDefault(); if(F.saving) return; const err=$("#fErr"); err.textContent="";
     const species=F.species || $("#spOther").value.trim(); if (!species){ err.textContent="Välj vilken art det är."; return; }
