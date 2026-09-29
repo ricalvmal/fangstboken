@@ -674,11 +674,56 @@ function renderLakes(){
   const counts=new Map(); S.catches.forEach(c=>{ if(c.lake_id) counts.set(c.lake_id,(counts.get(c.lake_id)||0)+1); });
   const sorted=[...S.lakes].sort((a,b)=>(counts.get(b.id)||0)-(counts.get(a.id)||0));
   return `<div class="view" style="max-width:720px"><div class="section-head"><h2>Vatten</h2><span class="muted num">${S.lakes.length} sparade</span></div>
-    <p class="muted" style="margin:0">När en bild eller telefonen har position väljs närmaste sparade vatten inom ${LAKE_RADIUS_KM} km automatiskt. Första gången du fiskar ett nytt vatten skriver du namnet, sedan känns det igen.</p>
+    <p class="muted" style="margin:0">När en bild eller telefonen har position väljs närmaste sparade vatten inom ${LAKE_RADIUS_KM} km automatiskt. Första gången du fiskar ett nytt vatten skriver du namnet, sedan känns det igen. Tryck på ett vatten för att byta namn, ändra position, slå ihop eller ta bort.</p>
     ${sorted.map(l=>{ const cs=S.catches.filter(c=>c.lake_id===l.id), sp=count(cs,c=>c.species)[0], bt=count(cs,baitName)[0], nt=S.trips.filter(t=>t.lake_id===l.id).length;
-      return `<div class="lake"><span class="nm">${esc(l.name)}</span><span class="c num">${counts.get(l.id)||0}<small>fångster</small></span>
-      <span class="muted" style="font-size:13px">${sp?`Mest ${esc(sp[0].toLowerCase())}`:"Inga fångster"}${bt?` · bäst på ${esc(bt[0])}`:""} · ${nt} ${nt===1?"tur":"turer"}${l.lat!=null?` · ${l.lat.toFixed(3)}, ${l.lon.toFixed(3)}`:" · ingen position"}</span></div>`; }).join("") || `<div class="empty"><p class="muted" style="margin:0">Inga vatten än. De skapas när du registrerar en fångst eller startar en tur.</p></div>`}
+      return `<button class="lake" data-lake-open="${esc(l.id)}" style="text-align:left;width:100%;cursor:pointer"><span class="nm">${esc(l.name)}</span><span class="c num">${counts.get(l.id)||0}<small>fångster</small></span>
+      <span class="muted" style="font-size:13px">${sp?`Mest ${esc(sp[0].toLowerCase())}`:"Inga fångster"}${bt?` · bäst på ${esc(bt[0])}`:""} · ${nt} ${nt===1?"tur":"turer"}${l.lat!=null?` · ${l.lat.toFixed(3)}, ${l.lon.toFixed(3)}`:" · ingen position"}</span></button>`; }).join("") || `<div class="empty"><p class="muted" style="margin:0">Inga vatten än. De skapas när du registrerar en fångst eller startar en tur.</p></div>`}
   </div>`;
+}
+// Redigera, slå ihop eller ta bort ett vatten. Fångster behåller vattnets namn även om vattnet tas bort.
+function openLake(id){
+  const l=byId(S.lakes,id); if(!l) return;
+  const cs=S.catches.filter(c=>c.lake_id===id), ts=S.trips.filter(t=>t.lake_id===id);
+  const others=S.lakes.filter(x=>x.id!==id).sort((a,b)=>a.name.localeCompare(b.name,"sv"));
+  const host=openOverlay(`<div class="sheet-head"><h2>${esc(l.name)}</h2><button class="x" data-close aria-label="Stäng">${I.x}</button></div>
+    <div style="display:grid;gap:16px">
+      <p class="muted" style="margin:0">${cs.length} ${cs.length===1?"fångst":"fångster"} · ${ts.length} ${ts.length===1?"tur":"turer"}</p>
+      <form class="panel" id="lkName" novalidate><h3>Namn</h3><div style="display:flex;gap:10px"><input class="inp" id="lkN" maxlength="60" value="${esc(l.name)}" style="flex:1"><button class="btn primary" type="submit">Spara</button></div><div class="err" id="lkErr" role="alert"></div></form>
+      <section class="panel"><h3>Position</h3><p class="sub">Används för att känna igen vattnet och hämta väder när en fångst saknar egen position.</p>
+        <p style="margin:0" id="lkPos">${l.lat!=null?`<a href="https://www.google.com/maps?q=${l.lat},${l.lon}" target="_blank" rel="noopener" style="color:var(--accent)">${Number(l.lat).toFixed(4)}, ${Number(l.lon).toFixed(4)}</a>`:"Ingen position sparad."}</p>
+        <div><button class="btn" id="lkHere">Använd min position nu</button></div></section>
+      ${others.length?`<section class="panel"><h3>Slå ihop</h3><p class="sub">Har samma vatten sparats två gånger? Flytta fångsterna och turerna härifrån till det andra vattnet och ta bort det här.</p>
+        <div style="display:flex;gap:10px;flex-wrap:wrap"><select class="inp" id="lkTo" style="flex:1 1 180px"><option value="">Välj vatten</option>${others.map(o=>`<option value="${esc(o.id)}">${esc(o.name)}</option>`).join("")}</select><button class="btn" id="lkMerge">Slå ihop</button></div></section>`:""}
+      <div><button class="btn danger ghost" id="lkDel">Ta bort vattnet</button></div>
+      <div id="lkConfirm"></div>
+    </div>`);
+  const busy=(btn,on,txt)=>{ btn.disabled=on; if(on) btn.innerHTML=`<span class="spin"></span> Vänta…`; else btn.textContent=txt; };
+  $("#lkName").onsubmit=async(e)=>{ e.preventDefault(); const n=$("#lkN").value.trim(), err=$("#lkErr"); err.textContent="";
+    if(!n){ err.textContent="Skriv ett namn."; return; }
+    if (S.lakes.some(x=>x.id!==id && x.name.toLowerCase()===n.toLowerCase())){ err.textContent="Det finns redan ett vatten med det namnet. Använd Slå ihop i stället."; return; }
+    const btn=e.submitter||$("#lkName button"); busy(btn,true);
+    try{ await dbUpdate("lakes", id, { name:n }); for (const c of cs) await dbUpdate("catches", c.id, { lake_name:n }).catch(()=>{});
+      closeOverlay(); render(); toast("Namnet är ändrat"); }catch(ex){ err.textContent=errText(ex); busy(btn,false,"Spara"); } };
+  $("#lkHere").onclick=async()=>{ const btn=$("#lkHere"); busy(btn,true); const p=await getPosition();
+    if(!p){ busy(btn,false,"Använd min position nu"); toast("Fick ingen position från telefonen."); return; }
+    try{ await dbUpdate("lakes", id, { lat:p.lat, lon:p.lon }); closeOverlay(); render(); openLake(id); toast("Positionen är uppdaterad"); }catch(ex){ busy(btn,false,"Använd min position nu"); toast(errText(ex)); } };
+  if ($("#lkMerge")) $("#lkMerge").onclick=()=>{ const to=byId(S.lakes,$("#lkTo").value); if(!to){ toast("Välj vilket vatten det ska slås ihop med."); return; }
+    $("#lkConfirm").innerHTML=`<div class="banner warn" style="display:grid;gap:10px"><span>Flytta ${cs.length} fångster och ${ts.length} turer till <b>${esc(to.name)}</b> och ta bort <b>${esc(l.name)}</b>?</span><div style="display:flex;gap:10px"><button class="btn danger" id="lkYes">Slå ihop</button><button class="btn ghost" id="lkNo">Avbryt</button></div></div>`;
+    $("#lkNo").onclick=()=>$("#lkConfirm").innerHTML="";
+    $("#lkYes").onclick=async()=>{ busy($("#lkYes"),true);
+      try{ for (const c of cs) await dbUpdate("catches", c.id, { lake_id:to.id, lake_name:to.name });
+        for (const t of ts) await dbUpdate("trips", t.id, { lake_id:to.id });
+        if (to.lat==null && l.lat!=null) await dbUpdate("lakes", to.id, { lat:l.lat, lon:l.lon });
+        await dbRemove("lakes", id); closeOverlay(); render(); toast(`Ihopslaget med ${to.name}`); }
+      catch(ex){ toast(errText(ex)); busy($("#lkYes"),false,"Slå ihop"); } }; };
+  $("#lkDel").onclick=()=>{
+    $("#lkConfirm").innerHTML=`<div class="banner warn" style="display:grid;gap:10px"><span>Ta bort <b>${esc(l.name)}</b>?${cs.length||ts.length?` ${cs.length} fångster och ${ts.length} turer finns kvar, men kopplas loss från vattnet. Fångsterna behåller namnet.`:""}</span><div style="display:flex;gap:10px"><button class="btn danger" id="lkYes">Ta bort</button><button class="btn ghost" id="lkNo">Avbryt</button></div></div>`;
+    $("#lkNo").onclick=()=>$("#lkConfirm").innerHTML="";
+    $("#lkYes").onclick=async()=>{ busy($("#lkYes"),true);
+      try{ await dbRemove("lakes", id); S.catches.forEach(c=>{ if(c.lake_id===id) c.lake_id=null; }); S.trips.forEach(t=>{ if(t.lake_id===id) t.lake_id=null; }); invalidate();
+        closeOverlay(); render(); toast("Vattnet är borttaget"); }
+      catch(ex){ toast(errText(ex)); busy($("#lkYes"),false,"Ta bort"); } };
+  };
 }
 function renderGang(){
   const admin = S.me.is_admin;
@@ -979,6 +1024,7 @@ function bindView(){
   $$("#main [data-trip-end]").forEach(b=>b.onclick=()=>endTrip(b.dataset.tripEnd));
   $$("#main [data-trip-open]").forEach(b=>b.onclick=()=>openTrip(b.dataset.tripOpen));
   $$("#main [data-trip-past]").forEach(b=>b.onclick=()=>tripForm());
+  $$("#main [data-lake-open]").forEach(b=>b.onclick=()=>openLake(b.dataset.lakeOpen));
   $$("#main [data-go]").forEach(b=>b.onclick=()=>go(b.dataset.go));
   $$("#main [data-factor]").forEach(b=>b.onclick=()=>{ S.factor=b.dataset.factor; render(); });
   $$("#main [data-export]").forEach(b=>b.onclick=()=>exportData(b.dataset.export));
