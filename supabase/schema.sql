@@ -1,5 +1,5 @@
 -- Fångstboken: databasen i Supabase.
--- Återskapad 2026-09-30 från den körande databasen, plus "Senast aktiv" (4-senast-aktiv.sql) djup (5-djup.sql) och dolda platser (6-dold-plats.sql) (tabeller, regler, funktioner, trigger, realtid, bildlagring).
+-- Återskapad 2026-09-30 från den körande databasen, plus "Senast aktiv" (4-senast-aktiv.sql) djup (5-djup.sql) dolda platser (6-dold-plats.sql) och privata fångster (7-privat.sql) (tabeller, regler, funktioner, trigger, realtid, bildlagring).
 --
 -- Kör hela filen i Supabase: SQL Editor -> New query -> klistra in -> Run.
 -- Filen går att köra flera gånger. Den skapar bara det som saknas och skriver om reglerna,
@@ -92,6 +92,7 @@ create table if not exists public.catches (
   depth_m        numeric,
   fish_depth_m   numeric,
   released       boolean not null default false,
+  is_private     boolean not null default false,
   note           text not null default '',
   time           timestamptz not null,
   lat            double precision,
@@ -112,6 +113,7 @@ create table if not exists public.catches (
 -- Kolumner som lagts till efter att tabellerna skapades.
 alter table public.catches add column if not exists depth_m numeric;
 alter table public.catches add column if not exists fish_depth_m numeric;
+alter table public.catches add column if not exists is_private boolean not null default false;
 
 grant select, insert, update, delete on public.members, public.lakes, public.baits, public.trips, public.catches to authenticated;
 
@@ -152,12 +154,16 @@ drop policy if exists "gang all" on public.trips;
 create policy "gang all" on public.trips for all using (public.is_member()) with check (public.is_member());
 
 -- Fångster: gänget läser, lägger till och ändrar. Bara fiskaren, den som lade in, eller admin tar bort.
+-- Privata fångster (is_private) ser och ändrar bara fiskaren och den som registrerade dem, inte heller admin.
 drop policy if exists "gang read" on public.catches;
-create policy "gang read" on public.catches for select using (public.is_member());
+create policy "gang read" on public.catches for select
+  using (public.is_member() and (not is_private or member_id = public.my_member_id() or created_by = public.my_member_id()));
 drop policy if exists "gang insert" on public.catches;
 create policy "gang insert" on public.catches for insert with check (public.is_member());
 drop policy if exists "gang update" on public.catches;
-create policy "gang update" on public.catches for update using (public.is_member()) with check (public.is_member());
+create policy "gang update" on public.catches for update
+  using (public.is_member() and (not is_private or member_id = public.my_member_id() or created_by = public.my_member_id()))
+  with check (public.is_member());
 drop policy if exists "own delete" on public.catches;
 create policy "own delete" on public.catches for delete
   using (public.is_admin() or (public.is_member() and (member_id = public.my_member_id() or created_by = public.my_member_id())));
@@ -240,9 +246,17 @@ end $$;
 insert into storage.buckets (id, name, public) values ('photos', 'photos', false)
 on conflict (id) do nothing;
 
+-- Bilden till en privat fångst kan bara ägaren öppna. Funktionen ser privata fångster men svarar bara ja eller nej.
+create or replace function public.photo_blocked(p text)
+returns boolean language sql stable security definer set search_path = public as $$
+  select exists (select 1 from public.catches c
+                 where c.photo = p and c.is_private
+                   and c.member_id is distinct from public.my_member_id()
+                   and c.created_by is distinct from public.my_member_id());
+$$;
 drop policy if exists "photos gang read" on storage.objects;
 create policy "photos gang read" on storage.objects for select
-  using (bucket_id = 'photos' and public.is_member());
+  using (bucket_id = 'photos' and public.is_member() and not public.photo_blocked(name));
 drop policy if exists "photos gang write" on storage.objects;
 create policy "photos gang write" on storage.objects for insert
   with check (bucket_id = 'photos' and public.is_member());
