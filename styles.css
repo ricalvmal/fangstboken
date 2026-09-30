@@ -351,3 +351,6 @@ a.btn.primary{color:var(--accent-ink)}
 .lock svg{width:13px;height:13px}
 .hidebox{display:grid;gap:4px}
 .hidebox .muted{font-size:13px}
+.ph .tag.priv{display:inline-flex;gap:5px;align-items:center}
+.tag.priv svg{width:13px;height:13px}
+.hidebox.off{opacity:.45;pointer-events:none}

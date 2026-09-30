@@ -172,6 +172,7 @@ const I = {
   fish:`<svg viewBox="0 0 64 64" fill="currentColor"><path d="M6 32c8-11 19-15 29-11 4 1.7 7.5 4.6 10.3 7.8L55 21v22l-9.7-7.8C42.5 38.4 39 41.3 35 43 25 47 14 43 6 32z"/></svg>`,
   cam:`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 8h3l2-3h6l2 3h3a1 1 0 011 1v10a1 1 0 01-1 1H4a1 1 0 01-1-1V9a1 1 0 011-1z"/><circle cx="12" cy="13.5" r="3.8"/></svg>`,
   x:`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>`,
+  eyeoff:`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3l18 18"/><path d="M10.6 5.1A10 10 0 0112 5c5 0 9 4.5 10 7-.4 1-1.3 2.4-2.6 3.7M6.3 6.3C4.2 7.7 2.7 9.9 2 12c1 2.5 5 7 10 7 1.9 0 3.6-.6 5-1.5"/><path d="M9.9 9.9a3 3 0 004.2 4.2"/></svg>`,
   lock:`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V8a4 4 0 018 0v3"/></svg>`,
   chev:`<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M9 6l6 6-6 6"/></svg>`,
 };
@@ -462,7 +463,7 @@ function card(c){
   const m=member(c.member_id);
   const size=[fmtKg(c.weight_kg), c.length_cm?`<small>${fmt1(c.length_cm)} cm</small>`:""].filter(Boolean).join(" ");
   return `<button class="card" data-open="${esc(c.id)}">
-    <div class="ph"><div class="noimg">${I.fish}</div>${photoImg(c.photo, c.species)}${c.released?`<span class="tag cr">Återutsatt</span>`:""}</div>
+    <div class="ph"><div class="noimg">${I.fish}</div>${photoImg(c.photo, c.species)}${c.released?`<span class="tag cr">Återutsatt</span>`:""}${c.is_private?`<span class="tag priv">${I.eyeoff}Privat</span>`:""}</div>
     <div class="body">
       <div class="row1"><span class="species">${esc(c.species)}</span><span class="size num">${size}</span></div>
       <div class="meta"><span>${I.clock}${esc(fmtDate(c.time))}</span>${placeName("catches",c)?`<span>${I.pin}${esc(placeName("catches",c))}${lockTag(c)}</span>`:""}
@@ -1162,7 +1163,7 @@ function openDetail(id){
   const rows=[
     ["Fiskare",esc(m?.name||"Tidigare medlem")],["Tid",esc(fmtDateLong(c.time))],["Vatten",c.hide_location?`${esc(placeName("catches",c))} ${lockTag(c)}<br><span class="muted" style="font-size:13px">${ownsLoc("catches",c)?"Dold för kompisarna. Bara du ser platsen.":"Platsen är dold av "+esc(m?.name||"fiskaren")+"."}</span>`:esc(placeName("catches",c)||"–")],
     ["Vikt",esc(fmtKg(c.weight_kg)||"–")],["Längd",c.length_cm?fmt1(c.length_cm)+" cm":"–"],["Bete",c.bait_id&&baitDoc(c)?`<button class="chip small" data-bait-open="${esc(c.bait_id)}">${esc(baitName(c))}</button>`:esc(baitName(c)||"–")],["Teknik",esc(c.technique||"–")],
-    ["Återutsatt",c.released?"Ja":"Nej"],["Bottendjup",c.depth_m!=null?fmt1(c.depth_m)+" m":"–"],["Högg på",c.fish_depth_m!=null?"ca "+fmt1(c.fish_depth_m)+" m":"–"],["Vattentemp",c.water_temp_c!=null?fmt1(c.water_temp_c)+" °C":"–"],
+    ...(c.is_private?[["Synlighet",`<span style="display:inline-flex;gap:6px;align-items:center">${I.eyeoff.replace("<svg",'<svg width="15" height="15"')}Privat, bara du ser fångsten</span>`]]:[]),["Återutsatt",c.released?"Ja":"Nej"],["Bottendjup",c.depth_m!=null?fmt1(c.depth_m)+" m":"–"],["Högg på",c.fish_depth_m!=null?"ca "+fmt1(c.fish_depth_m)+" m":"–"],["Vattentemp",c.water_temp_c!=null?fmt1(c.water_temp_c)+" °C":"–"],
     ...(tr?[["Tur",`<button class="chip small" data-trip-open="${esc(tr.id)}">${esc(placeName("trips",tr)||"Tur")} ${fmtTime(Date.parse(tr.started_at))}–${tr.ended_at?fmtTime(Date.parse(tr.ended_at)):"nu"}</button>`]]:[]),
     ...(w?[["Luft",w.tempC!=null?fmt1(w.tempC)+" °C"+(w.tempDelta24h!=null?` (${fmtDelta(w.tempDelta24h,"°")} på ett dygn)`:""):"–"],
       ["Lufttryck",w.pressure!=null?Math.round(w.pressure)+" hPa"+(w.pressureTrend?", "+esc(w.pressureTrend):""):"–"],
@@ -1220,7 +1221,9 @@ function openForm(edit=null){
     <span class="muted" style="font-size:13px;margin-top:-8px">Bottendjupet från ekolodet. Djupet fisken högg på räcker som en uppskattning. Båda är valfria.</span>
     ${lockedLoc?`<div class="field"><span class="label">Vatten</span><p class="muted" style="margin:0;display:flex;gap:6px;align-items:center">${lockTag(edit)}Platsen är dold av ${esc(member(edit.member_id)?.name||"fiskaren")} och kan bara ändras av hen.</p></div>`
     :`<div class="field"><label for="fLake">Vatten</label>${lakeSelect("fLake", edit?.lake_id||(edit?.lake_name?"__new":"")||activeTrip(S.me.id)?.lake_id||"")}<input class="inp" id="fLakeNew" placeholder="Namn på sjö eller plats" ${edit&&!edit.lake_id&&edit.lake_name?"":"hidden"} maxlength="60" value="${esc(edit&&!edit.lake_id?edit.lake_name||"":"")}"><span class="muted" id="lakeHint" style="font-size:13px"></span></div>
-    <div class="hidebox"><div class="toggle"><label for="fHide" style="font-weight:600;display:flex;gap:6px;align-items:center">${I.lock.replace("<svg",'<svg width="16" height="16"')} Dölj plats för kompisarna</label><input type="checkbox" class="switch" id="fHide" ${hideDefault?"checked":""}></div>
+    <div class="hidebox"><div class="toggle"><label for="fPrivate" style="font-weight:600;display:flex;gap:6px;align-items:center">${I.eyeoff.replace("<svg",'<svg width="16" height="16"')} Privat fångst</label><input type="checkbox" class="switch" id="fPrivate" ${edit?.is_private?"checked":""}></div>
+      <span class="muted">Bara du ser fångsten, bilden och allt om den. Kompisarna ser den inte alls, inte heller i statistiken eller topplistan. Inte heller admin.</span></div>
+    <div class="hidebox" id="hideRow"><div class="toggle"><label for="fHide" style="font-weight:600;display:flex;gap:6px;align-items:center">${I.lock.replace("<svg",'<svg width="16" height="16"')} Dölj plats för kompisarna</label><input type="checkbox" class="switch" id="fHide" ${hideDefault?"checked":""}></div>
       <span class="muted" id="hideHint">Kompisarna ser fisken, bilden och vädret, men inte vatten eller position. Ingen annan än du kan se platsen, inte heller admin. Hör fångsten till en tur döljs även turens plats.</span></div>`}
     <div class="field"><label for="fTime">Tid</label><input class="inp" type="datetime-local" id="fTime" value="${toLocalInput(edit?new Date(edit.time):new Date())}"></div>
     <div class="field"><label for="fAngler">Fiskare</label><select class="inp" id="fAngler">${S.members.filter(m=>m.active||m.id===edit?.member_id).map(m=>`<option value="${esc(m.id)}" ${m.id===(edit?.member_id||S.me.id)?"selected":""}>${esc(m.name)}</option>`).join("")}</select></div>
@@ -1279,6 +1282,8 @@ function openForm(edit=null){
     auto(); if (F.exifGps || !F.lakeTouched) matchLake();
   };
   $("#photoCam").onchange=onPhoto; $("#photoLib").onchange=onPhoto;
+  const privSync=()=>{ const r=$("#hideRow"); if (r) r.classList.toggle("off", !!$("#fPrivate")?.checked); };
+  if ($("#fPrivate")){ $("#fPrivate").onchange=privSync; privSync(); }
   $("#cf").onsubmit=async(e)=>{
     e.preventDefault(); if(F.saving) return; const err=$("#fErr"); err.textContent="";
     const species=F.species || $("#spOther").value.trim(); if (!species){ err.textContent="Välj vilken art det är."; return; }
@@ -1293,6 +1298,7 @@ function openForm(edit=null){
     const t=$("#fTime").value?new Date($("#fTime").value):new Date(); if (isNaN(t)){ err.textContent="Ange en giltig tid."; return; }
     const lakeSel=lockedLoc?"":$("#fLake").value, newName=lockedLoc?"":$("#fLakeNew").value.trim();
     const hide=lockedLoc ? true : !!$("#fHide")?.checked;
+    const priv=lockedLoc ? !!edit?.is_private : !!$("#fPrivate")?.checked;
     if (lakeSel==="__new" && !newName){ err.textContent="Skriv namnet på vattnet eller välj ett sparat."; return; }
     F.saving=true; const btn=$("#fSave"); btn.disabled=true; btn.innerHTML=`<span class="spin"></span> Sparar…`;
     try{
@@ -1311,7 +1317,7 @@ function openForm(edit=null){
       const trip = tripFor(member_id, t.getTime());
       const moved = !edit || (!lockedLoc && (edit.time!==timeISO || edit.lat!==lat || edit.lon!==lon));
       const row={ member_id, species, bait, bait_id, technique:F.technique, weight_kg, length_cm, water_temp_c, depth_m, fish_depth_m, released:$("#fRel").checked, note:$("#fNote").value.trim(),
-        time:timeISO, ...(lockedLoc ? {} : { lat, lon, pos_source, lake_id:lake?.id||null, lake_name:lake?.name||null, hide_location:hide }), photo, trip_id: trip?.id || null,
+        time:timeISO, ...(lockedLoc ? {} : { lat, lon, pos_source, lake_id:lake?.id||null, lake_name:lake?.name||null, hide_location:hide, is_private:priv }), photo, trip_id: trip?.id || null,
         ...(lockedLoc ? {} : { light: A.light(t,lat,lon) }), moon: A.moonPhase(t) };
       if (moved){ btn.innerHTML=`<span class="spin"></span> Hämtar väder…`; Object.assign(row, await weatherForCatch(row).catch(()=>({ weather:null, weather_status: lat!=null?"pending":"nopos" }))); }
       if (edit) await dbUpdate("catches", edit.id, row); else await dbInsert("catches", { ...row, created_by: S.me.id });
@@ -1319,7 +1325,7 @@ function openForm(edit=null){
       if (trip && hide && !lockedLoc && !trip.hide_location && ownsLoc("trips", trip)) await dbUpdate("trips", trip.id, { hide_location:true }).catch(()=>{});
       const tr2 = trip ? byId(S.trips, trip.id) : null;
       if (tr2 && tr2.lat==null && lat!=null && !lockedLoc && (!hide || tr2.hide_location)) dbUpdate("trips", tr2.id, { lat, lon }).catch(()=>{});
-      closeOverlay(); if (S.tab!=="trips") S.tab="feed"; render(); toast(edit?"Ändringarna är sparade":`${species} sparad`);
+      closeOverlay(); if (S.tab!=="trips") S.tab="feed"; render(); toast(edit?"Ändringarna är sparade":priv?`${species} sparad som privat`:`${species} sparad`);
     }catch(ex){ F.saving=false; btn.disabled=false; btn.textContent=edit?"Spara ändringar":"Spara fångst"; err.textContent=errText(ex); }
   };
 }
