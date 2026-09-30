@@ -362,6 +362,7 @@ function analysis(){
 // ---------- fångstflödet ----------
 function wxChips(c){
   const w=c.weather, out=[];
+  if (c.depth_m!=null || c.fish_depth_m!=null) out.push(`<span>${esc(depthTxt(c))}</span>`);
   if (c.water_temp_c!=null) out.push(`<span>Vatten ${fmt1(c.water_temp_c)}°C</span>`);
   if (w){
     if (w.tempC!=null) out.push(`<span>${Math.round(w.tempC)}°C</span>`);
@@ -375,6 +376,15 @@ function wxChips(c){
   if (c.moon) out.push(`<span>${esc(c.moon.phase)}</span>`);
   return out.join("");
 }
+// Djup: bottendjup och ungefärligt djup där fisken högg.
+function depthTxt(c){
+  const b=c.depth_m, f=c.fish_depth_m;
+  if (b!=null && f!=null) return `Botten ${fmt1(b)} m · högg på ${fmt1(f)} m`;
+  if (b!=null) return `Botten ${fmt1(b)} m`;
+  return `Högg på ${fmt1(f)} m`;
+}
+const DEPTH_BUCKETS=[["0–2 m",0,2],["2–4 m",2,4],["4–6 m",4,6],["6–10 m",6,10],["10–15 m",10,15],["15 m och djupare",15,1e9]];
+const depthBars=(vals)=>hbars(DEPTH_BUCKETS.map(([k,a,b])=>[k,vals.filter(v=>v>=a&&v<b).length]),6);
 function card(c){
   const m=member(c.member_id);
   const size=[fmtKg(c.weight_kg), c.length_cm?`<small>${fmt1(c.length_cm)} cm</small>`:""].filter(Boolean).join(" ");
@@ -666,6 +676,8 @@ function renderStats(){
   const months=Array(12).fill(0); list.forEach(c=>months[new Date(c.time).getMonth()]++);
   const withWx=list.filter(c=>c.weather).length;
   const wt=list.filter(c=>c.water_temp_c!=null).map(c=>Number(c.water_temp_c));
+  const bd=list.filter(c=>c.depth_m!=null).map(c=>Number(c.depth_m)), fd=list.filter(c=>c.fish_depth_m!=null).map(c=>Number(c.fish_depth_m));
+  const avg=(a)=>fmt1(a.reduce((x,y)=>x+y,0)/a.length);
   const tripIds = new Set(S.trips.filter(t => S.who==="all" || t.member_id===S.who).map(t=>t.id));
   const fh = an.hoursAll.filter(h => tripIds.has(h.trip));
   const tc = list.filter(c => c.trip_id && an.tripsDone.has(c.trip_id) && tripIds.has(c.trip_id)).map(c => ({ ...c, feats: an.feats.get(c.id) }));
@@ -691,6 +703,8 @@ function renderStats(){
       <section class="panel"><h3>När hugger det?</h3><p class="sub">Fångster per klockslag</p>${cols(hours,hours.map((_,i)=>String(i).padStart(2,"0")),3)}</section>
       <section class="panel"><h3>Säsong</h3><p class="sub">Fångster per månad</p>${cols(months,["jan","feb","mar","apr","maj","jun","jul","aug","sep","okt","nov","dec"],1)}</section>
       <section class="panel"><h3>Vattentemperatur</h3><p class="sub">${wt.length} av ${list.length} fångster har vattentemp${wt.length?` · snitt ${fmt1(wt.reduce((a,b)=>a+b,0)/wt.length)} °C`:""}</p>${wt.length?hbars([["Under 8 °C",wt.filter(v=>v<8).length],["8–12 °C",wt.filter(v=>v>=8&&v<12).length],["12–16 °C",wt.filter(v=>v>=12&&v<16).length],["16–20 °C",wt.filter(v=>v>=16&&v<20).length],["20 °C och över",wt.filter(v=>v>=20).length]],5):`<p class="muted" style="margin:0">Fyll i vattentemp när du registrerar fångster så syns det här.</p>`}</section>
+      <section class="panel"><h3>Bottendjup</h3><p class="sub">${S.statSpecies==="all"?"Alla arter":esc(S.statSpecies)} · ${bd.length} av ${list.length} fångster har bottendjup${bd.length?` · snitt ${avg(bd)} m`:""}</p>${bd.length?depthBars(bd):`<p class="muted" style="margin:0">Fyll i bottendjupet när du registrerar fångster så syns det här.</p>`}</section>
+      <section class="panel"><h3>Djup där fisken högg</h3><p class="sub">${S.statSpecies==="all"?"Alla arter":esc(S.statSpecies)} · ${fd.length} av ${list.length} fångster${fd.length?` · snitt ${avg(fd)} m`:""}</p>${fd.length?depthBars(fd):`<p class="muted" style="margin:0">Fyll i ungefär hur djupt fisken högg så syns det här.</p>`}</section>
       <section class="panel"><h3>Vatten</h3><p class="sub">Fångster per sjö eller plats</p>${hbars(count(list,c=>c.lake_name))}</section>
       <section class="panel"><h3>Månfas</h3><p class="sub">Fångster per månfas</p>${hbars(count(list,c=>c.moon?.phase))}</section>
     </div>
@@ -944,7 +958,7 @@ function download(name, text, type){
 function exportData(kind){
   const day=new Date().toISOString().slice(0,10);
   if (kind==="json"){ download(`fangstboken-${day}.json`, JSON.stringify({ exportedAt:new Date().toISOString(), members:S.members, lakes:S.lakes, baits:S.baits, trips:S.trips, catches:S.catches }, null, 1), "application/json"); return; }
-  const cols=[["Tid",c=>c.time],["Fiskare",c=>member(c.member_id)?.name],["Art",c=>c.species],["Vikt g",c=>c.weight_kg!=null?Math.round(c.weight_kg*1000):null],["Längd cm",c=>c.length_cm],["Vatten",c=>c.lake_name],["Bete",c=>baitName(c)],["Teknik",c=>c.technique],["Återutsatt",c=>c.released?"ja":"nej"],["Vattentemp",c=>c.water_temp_c],
+  const cols=[["Tid",c=>c.time],["Fiskare",c=>member(c.member_id)?.name],["Art",c=>c.species],["Vikt g",c=>c.weight_kg!=null?Math.round(c.weight_kg*1000):null],["Längd cm",c=>c.length_cm],["Bottendjup m",c=>c.depth_m],["Högg på m",c=>c.fish_depth_m],["Vatten",c=>c.lake_name],["Bete",c=>baitName(c)],["Teknik",c=>c.technique],["Återutsatt",c=>c.released?"ja":"nej"],["Vattentemp",c=>c.water_temp_c],
     ["Lufttemp",c=>c.weather?.tempC],["Lufttryck",c=>c.weather?.pressure],["Tryck 3h",c=>c.weather?.pressureDelta3h],["Tryck 24h",c=>c.weather?.pressureDelta24h],["Vind m/s",c=>c.weather?.windMs],["Vindriktning",c=>c.weather?.windDir],["Moln %",c=>c.weather?.cloudPct],["Nederbörd mm",c=>c.weather?.precipMm],["Ljus",c=>c.light],["Månfas",c=>c.moon?.phase],["Lat",c=>c.lat],["Lon",c=>c.lon],["Anteckning",c=>c.note]];
   const q=v=>{ if(v==null) return ""; const s=String(typeof v==="number"?String(v).replace(".",","):v); return /[;"\n]/.test(s)?`"${s.replace(/"/g,'""')}"`:s; };
   download(`fangster-${day}.csv`, "﻿"+[cols.map(c=>c[0]).join(";"), ...S.catches.map(c=>cols.map(([,f])=>q(f(c))).join(";"))].join("\n"), "text/csv;charset=utf-8");
@@ -1065,7 +1079,7 @@ function openDetail(id){
   const rows=[
     ["Fiskare",esc(m?.name||"Tidigare medlem")],["Tid",esc(fmtDateLong(c.time))],["Vatten",esc(c.lake_name||"–")],
     ["Vikt",esc(fmtKg(c.weight_kg)||"–")],["Längd",c.length_cm?fmt1(c.length_cm)+" cm":"–"],["Bete",c.bait_id&&baitDoc(c)?`<button class="chip small" data-bait-open="${esc(c.bait_id)}">${esc(baitName(c))}</button>`:esc(baitName(c)||"–")],["Teknik",esc(c.technique||"–")],
-    ["Återutsatt",c.released?"Ja":"Nej"],["Vattentemp",c.water_temp_c!=null?fmt1(c.water_temp_c)+" °C":"–"],
+    ["Återutsatt",c.released?"Ja":"Nej"],["Bottendjup",c.depth_m!=null?fmt1(c.depth_m)+" m":"–"],["Högg på",c.fish_depth_m!=null?"ca "+fmt1(c.fish_depth_m)+" m":"–"],["Vattentemp",c.water_temp_c!=null?fmt1(c.water_temp_c)+" °C":"–"],
     ...(tr?[["Tur",`<button class="chip small" data-trip-open="${esc(tr.id)}">${esc(byId(S.lakes,tr.lake_id)?.name||"Tur")} ${fmtTime(Date.parse(tr.started_at))}–${tr.ended_at?fmtTime(Date.parse(tr.ended_at)):"nu"}</button>`]]:[]),
     ...(w?[["Luft",w.tempC!=null?fmt1(w.tempC)+" °C"+(w.tempDelta24h!=null?` (${fmtDelta(w.tempDelta24h,"°")} på ett dygn)`:""):"–"],
       ["Lufttryck",w.pressure!=null?Math.round(w.pressure)+" hPa"+(w.pressureTrend?", "+esc(w.pressureTrend):""):"–"],
@@ -1116,6 +1130,9 @@ function openForm(edit=null){
     <div class="field"><span class="label">Teknik</span><div class="chips" id="teChips">${TECH.map(t=>`<button type="button" class="chip small" data-v="${esc(t)}" aria-pressed="${F.technique===t}">${esc(t)}</button>`).join("")}</div></div>
     <div class="row2"><div class="field"><label for="fWater">Vattentemp (°C)</label><input class="inp num" id="fWater" inputmode="decimal" placeholder="14,5" value="${edit?.water_temp_c!=null?String(edit.water_temp_c).replace(".",","):""}"></div>
       <span class="muted" style="font-size:13px;align-self:end;padding-bottom:12px">Från ekolodet eller termometern. Valfritt, men viktigt för mönstren.</span></div>
+    <div class="row2"><div class="field"><label for="fDepth">Bottendjup (m)</label><input class="inp num" id="fDepth" inputmode="decimal" placeholder="8,5" value="${edit?.depth_m!=null?String(edit.depth_m).replace(".",","):""}"></div>
+      <div class="field"><label for="fFishDepth">Fisken högg på (m)</label><input class="inp num" id="fFishDepth" inputmode="decimal" placeholder="ca 6" value="${edit?.fish_depth_m!=null?String(edit.fish_depth_m).replace(".",","):""}"></div></div>
+    <span class="muted" style="font-size:13px;margin-top:-8px">Bottendjupet från ekolodet. Djupet fisken högg på räcker som en uppskattning. Båda är valfria.</span>
     <div class="field"><label for="fLake">Vatten</label>${lakeSelect("fLake", edit?.lake_id||activeTrip(S.me.id)?.lake_id||"")}<input class="inp" id="fLakeNew" placeholder="Namn på sjö eller plats" hidden maxlength="60"><span class="muted" id="lakeHint" style="font-size:13px"></span></div>
     <div class="field"><label for="fTime">Tid</label><input class="inp" type="datetime-local" id="fTime" value="${toLocalInput(edit?new Date(edit.time):new Date())}"></div>
     <div class="field"><label for="fAngler">Fiskare</label><select class="inp" id="fAngler">${S.members.filter(m=>m.active||m.id===edit?.member_id).map(m=>`<option value="${esc(m.id)}" ${m.id===(edit?.member_id||S.me.id)?"selected":""}>${esc(m.name)}</option>`).join("")}</select></div>
@@ -1179,8 +1196,11 @@ function openForm(edit=null){
     const species=F.species || $("#spOther").value.trim(); if (!species){ err.textContent="Välj vilken art det är."; return; }
     const pn=(id)=>{ const v=$(id).value.replace(",",".").trim(); return v?Number(v):null; };
     const weight_g=pn("#fKg"), length_cm=pn("#fCm"), water_temp_c=pn("#fWater");
+    const depth_m=pn("#fDepth"), fish_depth_m=pn("#fFishDepth");
     const weight_kg = weight_g==null ? null : Math.round(weight_g)/1000;
     if ((weight_kg!=null && !(weight_kg>0 && weight_kg<200)) || (length_cm!=null && !(length_cm>0 && length_cm<400))){ err.textContent="Kontrollera vikt och längd, använd bara siffror."; return; }
+    if ((depth_m!=null && !(depth_m>0 && depth_m<=300)) || (fish_depth_m!=null && !(fish_depth_m>=0 && fish_depth_m<=300))){ err.textContent="Kontrollera djupet, använd bara siffror i meter."; return; }
+    if (depth_m!=null && fish_depth_m!=null && fish_depth_m>depth_m+0.5){ err.textContent="Fisken kan inte ha huggit djupare än botten. Kontrollera djupen."; return; }
     if (water_temp_c!=null && !(water_temp_c>=-2 && water_temp_c<=35)){ err.textContent="Vattentemperaturen ska vara ett tal mellan −2 och 35 °C."; return; }
     const t=$("#fTime").value?new Date($("#fTime").value):new Date(); if (isNaN(t)){ err.textContent="Ange en giltig tid."; return; }
     const lakeSel=$("#fLake").value, newName=$("#fLakeNew").value.trim();
@@ -1200,7 +1220,7 @@ function openForm(edit=null){
       const member_id=$("#fAngler").value, timeISO=t.toISOString();
       const trip = tripFor(member_id, t.getTime());
       const moved = !edit || edit.time!==timeISO || edit.lat!==lat || edit.lon!==lon;
-      const row={ member_id, species, bait, bait_id, technique:F.technique, weight_kg, length_cm, water_temp_c, released:$("#fRel").checked, note:$("#fNote").value.trim(),
+      const row={ member_id, species, bait, bait_id, technique:F.technique, weight_kg, length_cm, water_temp_c, depth_m, fish_depth_m, released:$("#fRel").checked, note:$("#fNote").value.trim(),
         time:timeISO, lat, lon, pos_source, lake_id:lake?.id||null, lake_name:lake?.name||null, photo, trip_id: trip?.id || null,
         light: A.light(t,lat,lon), moon: A.moonPhase(t) };
       if (moved){ btn.innerHTML=`<span class="spin"></span> Hämtar väder…`; Object.assign(row, await weatherForCatch(row).catch(()=>({ weather:null, weather_status: lat!=null?"pending":"nopos" }))); }
