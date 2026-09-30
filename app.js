@@ -3,7 +3,8 @@ import * as A from "./analysis.js";
 const { H } = A;
 
 // ---------- konstanter ----------
-const SPECIES = ["Abborre","Gädda","Gös","Öring","Regnbåge","Sik","Harr","Röding","Lax","Braxen","Mört","Karp","Id","Lake"];
+const SPECIES = ["Abborre","Gädda","Gös","Karp","Sarv","Färna","Braxen","Mört","Öring","Regnbåge","Sik","Harr","Röding","Lax","Id","Lake"];
+const SPECIES_CHIPS = 12; // Så många arter visas som knappar. Övriga nås via "Annan art".
 const TECH = ["Spinn","Jigg","Dropshot","Mete","Fluga","Trolling","Pimpel","Vertikal"];
 const BAIT_TYPES = ["Jigg","Wobbler","Jerkbait","Glidebait","Skeddrag","Spinnare","Spinnerbait","Dropshot","Pilk","Fluga","Mask/mete","Levande bete","Övrigt"];
 // Betskatalog: modeller med storlekar och färger enligt tillverkarens produktsida.
@@ -55,7 +56,7 @@ function openCatalog(){
 const COLORS = ["Röd","Orange","Chartreuse","Vit","Svart","Guld","Silver","Firetiger","Motor oil","Naturfärg"];
 const PCOLORS = ["var(--p1)","var(--p2)","var(--p3)","var(--p4)"];
 const LAKE_RADIUS_KM = 2.5;
-const TABLES = ["members","lakes","baits","trips","catches"];
+const TABLES = ["members","lakes","baits","trips","catches","catch_secrets","trip_secrets"];
 
 const $ = (s, r=document) => r.querySelector(s);
 const $$ = (s, r=document) => [...r.querySelectorAll(s)];
@@ -81,6 +82,7 @@ async function makeSupabaseApi(cfg){
       return chk(await q);
     },
     async insert(table, row){ return chk(await sb.from(table).insert(row).select().single()); },
+    async upsert(table, row){ return chk(await sb.from(table).upsert(row).select().single()); },
     async update(table, id, patch){ return chk(await sb.from(table).update(patch).eq("id", id).select().single()); },
     async remove(table, id){
       const d = chk(await sb.from(table).delete().eq("id", id).select("id"));
@@ -127,7 +129,7 @@ async function openMeteo(lat, lon, fromMs, toMs){
 }
 
 // ---------- tillstånd ----------
-const S = { api:null, session:null, me:null, members:[], lakes:[], baits:[], trips:[], catches:[], loaded:false,
+const S = { api:null, session:null, me:null, members:[], lakes:[], baits:[], trips:[], catches:[], catch_secrets:[], trip_secrets:[], loaded:false,
   tab: ls.get("fb.tab") || "feed", who:"all", statSpecies:"all", feedWho:"all", factor:"trend3",
   baitType:"all", baitQ:"", baitSort:"catches", urls:{}, urlAt:0, authMode:"login", _hours:null, _feats:null };
 const member = (id) => S.members.find(m => m.id === id);
@@ -170,6 +172,7 @@ const I = {
   fish:`<svg viewBox="0 0 64 64" fill="currentColor"><path d="M6 32c8-11 19-15 29-11 4 1.7 7.5 4.6 10.3 7.8L55 21v22l-9.7-7.8C42.5 38.4 39 41.3 35 43 25 47 14 43 6 32z"/></svg>`,
   cam:`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 8h3l2-3h6l2 3h3a1 1 0 011 1v10a1 1 0 01-1 1H4a1 1 0 01-1-1V9a1 1 0 011-1z"/><circle cx="12" cy="13.5" r="3.8"/></svg>`,
   x:`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>`,
+  lock:`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V8a4 4 0 018 0v3"/></svg>`,
   chev:`<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M9 6l6 6-6 6"/></svg>`,
 };
 
@@ -204,6 +207,7 @@ async function afterAuth(){
 async function loadAll(){
   const res = await Promise.all(TABLES.map(t => S.api.load(t).catch(() => null)));
   TABLES.forEach((t,i) => { if (res[i]) S[t] = res[i]; });
+  applySecrets();
   S.me = S.members.find(m => m.id === S.me?.id) || S.me;
   S.loaded = true; invalidate();
 }
@@ -212,16 +216,84 @@ function onChange(table){
   if (!TABLES.includes(table)) return;
   clearTimeout(reloadT[table]);
   reloadT[table] = setTimeout(async () => {
-    try{ S[table] = await S.api.load(table); invalidate();
+    try{ S[table] = await S.api.load(table); if (LOC_TABLES.includes(table) || SEC_TABLES.includes(table)) applySecrets(); invalidate();
       if (table === "members"){ S.me = S.members.find(m => m.id === S.me?.id && m.active) || null; if (!S.me){ renderNotMember(); return; } }
       render(); }catch(e){}
   }, 350);
 }
 // Uppdatera lokalt direkt efter egna ändringar, utan att vänta på realtid.
-function upsertLocal(table, row){ const i = S[table].findIndex(x => x.id === row.id); if (i >= 0) S[table][i] = row; else S[table].unshift(row); invalidate(); }
+function upsertLocal(table, row){ if (LOC[table]) row = withSecret(table, row); const i = S[table].findIndex(x => x.id === row.id); if (i >= 0) S[table][i] = row; else S[table].unshift(row); invalidate(); }
 function removeLocal(table, id){ S[table] = S[table].filter(x => x.id !== id); invalidate(); }
-async function dbInsert(table, row){ const r = await S.api.insert(table, row); upsertLocal(table, r); return r; }
-async function dbUpdate(table, id, patch){ const r = await S.api.update(table, id, { ...patch, ...(table!=="members"&&table!=="lakes" ? { updated_at: new Date().toISOString() } : {}) }); upsertLocal(table, r); return r; }
+
+// ---------- dolda platser ----------
+// En fångst eller tur med hide_location har varken vatten eller position i den delade tabellen.
+// Platsen sparas i catch_secrets/trip_secrets, som bara fiskaren kan läsa (se 6-dold-plats.sql).
+// All skrivning går genom dbInsert/dbUpdate nedan, så att ingen väg råkar spara platsen öppet.
+const LOC = { catches:["lat","lon","pos_source","lake_id","lake_name"], trips:["lat","lon","lake_id","lake_name"] };
+const SEC = { catches:"catch_secrets", trips:"trip_secrets" };
+const LOC_TABLES = Object.keys(LOC), SEC_TABLES = Object.values(SEC);
+const MAIN_COLS = { catches:LOC.catches, trips:["lat","lon","lake_id"] };
+const secretOf = (table, id) => S[SEC[table]].find(x => x.id === id) || null;
+const ownsLoc = (table, r) => !!S.me && !!r && (r.member_id === S.me.id || (table === "catches" && r.created_by === S.me.id));
+function withSecret(table, row){
+  const sec = row && row.hide_location ? secretOf(table, row.id) : null; if (!sec) return row;
+  const o = { ...row }; for (const k of LOC[table]) if (sec[k] != null) o[k] = sec[k]; return o;
+}
+function applySecrets(){ for (const t of LOC_TABLES) S[t] = S[t].map(r => withSecret(t, r)); invalidate(); }
+const pick = (o, keys) => Object.fromEntries(keys.filter(k => k in o).map(k => [k, o[k]]));
+async function saveSecret(table, id, loc){
+  const sec = await S.api.upsert(SEC[table], { ...(secretOf(table, id) || {}), ...loc, id, updated_at: new Date().toISOString() });
+  const list = S[SEC[table]], i = list.findIndex(x => x.id === id); if (i >= 0) list[i] = sec; else list.push(sec);
+}
+async function dropSecret(table, id){
+  if (!secretOf(table, id)) return;
+  await S.api.remove(SEC[table], id).catch(() => {});
+  S[SEC[table]] = S[SEC[table]].filter(x => x.id !== id);
+}
+async function dbInsert(table, row){
+  if (LOC[table] && row.hide_location){
+    const loc = pick(row, LOC[table]), main = { ...row };
+    for (const k of LOC[table]) delete main[k];
+    const r = await S.api.insert(table, main);
+    await saveSecret(table, r.id, loc);
+    upsertLocal(table, r); return byId(S[table], r.id);
+  }
+  if (table === "trips") delete row.lake_name;
+  const r = await S.api.insert(table, row); upsertLocal(table, r); return LOC[table] ? byId(S[table], r.id) : r;
+}
+async function dbUpdate(table, id, patch){
+  patch = { ...patch };
+  if (LOC[table]){
+    const cur = byId(S[table], id) || {}, next = { ...cur, ...patch };
+    const hidden = !!next.hide_location, owner = ownsLoc(table, next);
+    if (hidden){
+      const loc = pick(patch, LOC[table]);
+      if (patch.hide_location === true && !cur.hide_location) Object.assign(loc, { ...pick(cur, LOC[table]), ...loc });
+      for (const k of LOC[table]) delete patch[k];
+      if (patch.hide_location === true) for (const k of MAIN_COLS[table]) patch[k] = null;
+      if (owner && Object.keys(loc).length) await saveSecret(table, id, loc);
+    } else if (patch.hide_location === false && cur.hide_location){
+      const sec = secretOf(table, id) || cur;
+      for (const k of MAIN_COLS[table]) if (!(k in patch)) patch[k] = sec[k] ?? null;
+      await dropSecret(table, id);
+    }
+    if (table === "trips") delete patch.lake_name;
+  }
+  const r = await S.api.update(table, id, { ...patch, ...(table!=="members"&&table!=="lakes" ? { updated_at: new Date().toISOString() } : {}) });
+  upsertLocal(table, r); return LOC[table] ? byId(S[table], id) : r;
+}
+// Namnet som visas för platsen. Kompisar ser "Hemligt vatten" när platsen är dold.
+function placeName(table, r){
+  if (!r) return "";
+  const lake = r.lake_id ? byId(S.lakes, r.lake_id) : null;
+  return lake?.name || r.lake_name || (r.hide_location ? "Hemligt vatten" : "");
+}
+const lockTag = (r) => r?.hide_location ? `<span class="lock" title="Platsen är dold för kompisarna">${I.lock}</span>` : "";
+// Välj vatten för en dold plats utan att skapa eller ändra något delat vatten.
+function resolveHiddenLake(sel, newName, pos){
+  if (sel === "__new"){ const ex = S.lakes.find(l => l.name.toLowerCase() === newName.toLowerCase()); return ex || { id:null, name:newName, lat:pos?.lat ?? null, lon:pos?.lon ?? null }; }
+  return sel ? byId(S.lakes, sel) : null;
+}
 async function dbRemove(table, id){ await S.api.remove(table, id); removeLocal(table, id); }
 
 // ---------- inloggning ----------
@@ -291,15 +363,16 @@ async function hydratePhotos(root=document){
   if (missing.length){ try{ Object.assign(S.urls, await S.api.signedUrls(missing)); }catch(e){} }
   imgs.forEach(i => { const u = S.urls[i.dataset.photo]; if (u){ i.src = u; i.onerror = () => i.remove(); } });
 }
-async function shrink(file){
+async function shrink(file, strict=false){
   const url=URL.createObjectURL(file);
   try{
     const img=await new Promise((res,rej)=>{ const i=new Image(); i.onload=()=>res(i); i.onerror=rej; i.src=url; });
     const max=1600, s=Math.min(1, max/Math.max(img.naturalWidth,img.naturalHeight));
     const c=document.createElement("canvas"); c.width=Math.round(img.naturalWidth*s); c.height=Math.round(img.naturalHeight*s);
     c.getContext("2d").drawImage(img,0,0,c.width,c.height);
-    return await new Promise(res=>c.toBlob(b=>res(b||file),"image/jpeg",0.84));
-  }catch(e){ return file; } finally { URL.revokeObjectURL(url); }
+    const b=await new Promise(res=>c.toBlob(res,"image/jpeg",0.84));
+    if (!b && strict) throw new Error("NO_SHRINK"); return b||file;
+  }catch(e){ if (strict) throw new Error("Bilden kunde inte förberedas utan platsinformation. Prova en annan bild."); return file; } finally { URL.revokeObjectURL(url); }
 }
 
 // Bildväljare med två knappar: kameran direkt och galleriet (Android visar annars bara galleriet).
@@ -342,7 +415,7 @@ let backfilling = false;
 async function backfillWeather(){
   if (backfilling) return; backfilling = true;
   try{
-    const trips = S.trips.filter(t => t.ended_at && t.weather_status === "pending").slice(0, 6);
+    const trips = S.trips.filter(t => t.ended_at && t.weather_status === "pending" && (!t.hide_location || ownsLoc("trips", t))).slice(0, 6);
     for (const t of trips){ const p = await weatherForTrip(t); if (p) await dbUpdate("trips", t.id, p).catch(()=>{}); }
     const cs = S.catches.filter(c => c.weather_status === "pending" && c.lat != null).slice(0, 12);
     for (const c of cs){ const p = await weatherForCatch(c); if (p.weather_status !== "pending") await dbUpdate("catches", c.id, p).catch(()=>{}); }
@@ -392,7 +465,7 @@ function card(c){
     <div class="ph"><div class="noimg">${I.fish}</div>${photoImg(c.photo, c.species)}${c.released?`<span class="tag cr">Återutsatt</span>`:""}</div>
     <div class="body">
       <div class="row1"><span class="species">${esc(c.species)}</span><span class="size num">${size}</span></div>
-      <div class="meta"><span>${I.clock}${esc(fmtDate(c.time))}</span>${c.lake_name?`<span>${I.pin}${esc(c.lake_name)}</span>`:""}
+      <div class="meta"><span>${I.clock}${esc(fmtDate(c.time))}</span>${placeName("catches",c)?`<span>${I.pin}${esc(placeName("catches",c))}${lockTag(c)}</span>`:""}
         ${baitName(c)?`<span>${I.lure}${esc(baitName(c))}${c.technique?" · "+esc(c.technique):""}</span>`:""}</div>
       <div class="wx">${wxChips(c)}</div>
       <div class="who">${avatar(m,"sm")}${esc(m?.name||"Tidigare medlem")}</div>
@@ -406,8 +479,8 @@ function tripBars(){
   const live = S.trips.filter(t => !t.ended_at);
   const mine = live.find(t => t.member_id === S.me.id);
   const others = live.filter(t => t.member_id !== S.me.id);
-  const bar = (t, own) => { const m=member(t.member_id), l=byId(S.lakes,t.lake_id), n=S.catches.filter(c=>c.trip_id===t.id).length;
-    return `<div class="tripbar live"><span class="dot"></span><div class="txt"><b>${own?"Du fiskar":esc(m?.name||"")+" fiskar"}${l?" på "+esc(l.name):""}</b><span>Sedan ${fmtTime(Date.parse(t.started_at))} · ${n} ${n===1?"fångst":"fångster"}</span></div>
+  const bar = (t, own) => { const m=member(t.member_id), pl=placeName("trips",t), n=S.catches.filter(c=>c.trip_id===t.id).length;
+    return `<div class="tripbar live"><span class="dot"></span><div class="txt"><b>${own?"Du fiskar":esc(m?.name||"")+" fiskar"}${pl?" på "+esc(pl):""}${lockTag(t)}</b><span>Sedan ${fmtTime(Date.parse(t.started_at))} · ${n} ${n===1?"fångst":"fångster"}</span></div>
       ${own?`<button class="btn" data-trip-end="${esc(t.id)}">Avsluta</button>`:`<button class="btn ghost" data-trip-open="${esc(t.id)}">Visa</button>`}</div>`; };
   return (mine ? bar(mine, true) : `<div class="tripbar"><div class="txt"><b>Ute och fiskar?</b><span>Starta en tur så räknas timmarna, även de utan napp.</span></div><button class="btn primary" data-trip-start>Starta tur</button></div>`)
     + others.map(t => bar(t, false)).join("");
@@ -430,8 +503,8 @@ function tripStats(t){
   return { cs, dur: e - s, rate: (e - s) > 0 ? cs.length / ((e - s) / H) : 0 };
 }
 function tripRow(t){
-  const m=member(t.member_id), l=byId(S.lakes,t.lake_id), st=tripStats(t), s=Date.parse(t.started_at);
-  return `<button class="trip" data-trip-open="${esc(t.id)}"><span class="nm">${esc(l?.name||"Okänt vatten")}${t.ended_at?"":` <span class="tag-unsure" style="color:var(--good);border-color:var(--good)">pågår</span>`}</span>
+  const m=member(t.member_id), st=tripStats(t), s=Date.parse(t.started_at);
+  return `<button class="trip" data-trip-open="${esc(t.id)}"><span class="nm">${esc(placeName("trips",t)||"Okänt vatten")}${lockTag(t)}${t.ended_at?"":` <span class="tag-unsure" style="color:var(--good);border-color:var(--good)">pågår</span>`}</span>
     <span class="c num">${st.cs.length}<small>${st.cs.length===1?"fångst":"fångster"}</small></span>
     <span class="sub">${avatar(m,"sm")} ${esc(m?.name||"")} · ${esc(fmtDay(s))} ${fmtTime(s)}–${t.ended_at?fmtTime(Date.parse(t.ended_at)):"nu"} · ${fmtDur(st.dur)}${t.ended_at&&st.dur>=30*60000?` · ${fmt1(st.rate)} per timme`:""}</span></button>`;
 }
@@ -449,6 +522,7 @@ async function startTrip(){
   const host = openOverlay(`<div class="sheet-head"><h2>Starta tur</h2><button class="x" data-close aria-label="Stäng">${I.x}</button></div>
     <form class="form" id="tsf" novalidate>
       <div class="field"><label for="tsLake">Vatten</label>${lakeSelect("tsLake","")}<input class="inp" id="tsLakeNew" placeholder="Namn på sjö eller plats" hidden maxlength="60"><span class="muted" id="tsHint" style="font-size:13px">Söker position…</span></div>
+      <div class="hidebox"><div class="toggle"><label for="tsHide" style="font-weight:600;display:flex;gap:6px;align-items:center">${I.lock.replace("<svg",'<svg width="16" height="16"')} Dölj plats för kompisarna</label><input type="checkbox" class="switch" id="tsHide" ></div><span class="muted">Kompisarna ser att du fiskar, men inte var. Fångster på turen döljs automatiskt.</span></div>
       <div class="err" id="tsErr" role="alert"></div>
       <div class="form-actions"><button type="button" class="btn ghost" data-close>Avbryt</button><button type="submit" class="btn primary" id="tsSave">Starta nu</button></div>
     </form>`);
@@ -466,9 +540,10 @@ async function startTrip(){
     if (sel.value==="__new" && !nw.value.trim()){ err.textContent="Skriv namnet på vattnet."; return; }
     const btn=$("#tsSave"); btn.disabled=true; btn.innerHTML=`<span class="spin"></span> Startar…`;
     try{
-      const lake = await resolveLake(sel.value, nw.value.trim(), pos);
+      const hide = $("#tsHide").checked;
+      const lake = hide ? resolveHiddenLake(sel.value, nw.value.trim(), pos) : await resolveLake(sel.value, nw.value.trim(), pos);
       let lat = pos?.lat ?? lake?.lat ?? null, lon = pos?.lon ?? lake?.lon ?? null;
-      await dbInsert("trips", { member_id:S.me.id, lake_id:lake?.id||null, lat, lon, started_at:new Date().toISOString() });
+      await dbInsert("trips", { member_id:S.me.id, lake_id:lake?.id||null, lat, lon, started_at:new Date().toISOString(), ...(hide ? { hide_location:true, lake_name:lake?.name||null } : {}) });
       closeOverlay(); render(); toast("Turen är startad. Lycka till!");
     }catch(ex){ err.textContent=errText(ex); btn.disabled=false; btn.textContent="Starta nu"; }
   };
@@ -497,10 +572,13 @@ async function linkCatches(t){
   for (const c of cs) await dbUpdate("catches", c.id, { trip_id: t.id }).catch(()=>{});
 }
 function tripForm(edit=null){
+  const tpLocked = !!edit && !!edit.hide_location && !ownsLoc("trips", edit);
   const now = new Date(), s0 = edit ? new Date(edit.started_at) : new Date(now.getTime()-3*H), e0 = edit?.ended_at ? new Date(edit.ended_at) : (edit ? null : now);
   openOverlay(`<div class="sheet-head"><h2>${edit?"Redigera tur":"Tur i efterhand"}</h2><button class="x" data-close aria-label="Stäng">${I.x}</button></div>
     <form class="form" id="tpf" novalidate>
-      <div class="field"><label for="tpLake">Vatten</label>${lakeSelect("tpLake", edit?.lake_id||"")}<input class="inp" id="tpLakeNew" placeholder="Namn på sjö eller plats" hidden maxlength="60"></div>
+      ${tpLocked?`<div class="field"><span class="label">Vatten</span><p class="muted" style="margin:0;display:flex;gap:6px;align-items:center">${lockTag(edit)}Platsen är dold av ${esc(member(edit.member_id)?.name||"fiskaren")}.</p></div>`
+      :`<div class="field"><label for="tpLake">Vatten</label>${lakeSelect("tpLake", edit?.lake_id||(edit?.lake_name?"__new":""))}<input class="inp" id="tpLakeNew" placeholder="Namn på sjö eller plats" ${edit&&!edit.lake_id&&edit.lake_name?"":"hidden"} maxlength="60" value="${esc(edit&&!edit.lake_id?edit.lake_name||"":"")}"></div>
+      <div class="hidebox"><div class="toggle"><label for="tpHide" style="font-weight:600;display:flex;gap:6px;align-items:center">${I.lock.replace("<svg",'<svg width="16" height="16"')} Dölj plats för kompisarna</label><input type="checkbox" class="switch" id="tpHide" ${edit?.hide_location?"checked":""}></div><span class="muted">Kompisarna ser turen, men inte var. Gäller bara dina egna turer.</span></div>`}
       <div class="field"><label for="tpWho">Fiskare</label><select class="inp" id="tpWho">${S.members.filter(m=>m.active||m.id===edit?.member_id).map(m=>`<option value="${esc(m.id)}" ${m.id===(edit?.member_id||S.me.id)?"selected":""}>${esc(m.name)}</option>`).join("")}</select></div>
       <div class="row2"><div class="field"><label for="tpS">Start</label><input class="inp" type="datetime-local" id="tpS" value="${toLocalInput(s0)}"></div>
         <div class="field"><label for="tpE">Slut</label><input class="inp" type="datetime-local" id="tpE" value="${e0?toLocalInput(e0):""}"></div></div>
@@ -508,7 +586,7 @@ function tripForm(edit=null){
       <div class="err" id="tpErr" role="alert"></div>
       <div class="form-actions"><button type="button" class="btn ghost" data-close>Avbryt</button><button type="submit" class="btn primary" id="tpSave">Spara tur</button></div>
     </form>`);
-  const sel=$("#tpLake"), nw=$("#tpLakeNew"); sel.onchange=()=>{ nw.hidden = sel.value!=="__new"; };
+  const sel=$("#tpLake")||{value:""}, nw=$("#tpLakeNew")||{value:""}; if ($("#tpLake")) sel.onchange=()=>{ nw.hidden = sel.value!=="__new"; };
   $("#tpf").onsubmit = async (e) => {
     e.preventDefault(); const err=$("#tpErr"); err.textContent="";
     const s=new Date($("#tpS").value), en=$("#tpE").value?new Date($("#tpE").value):null;
@@ -517,12 +595,16 @@ function tripForm(edit=null){
     if (en && en - s > 7*24*H){ err.textContent="En tur kan vara högst en vecka."; return; }
     if (!en && !edit){ err.textContent="Ange när turen slutade."; return; }
     if (sel.value==="__new" && !nw.value.trim()){ err.textContent="Skriv namnet på vattnet."; return; }
+    const hide = tpLocked ? true : !!$("#tpHide")?.checked, who=$("#tpWho").value;
+    if (hide && !tpLocked && who!==S.me.id){ err.textContent="Du kan bara dölja platsen för dina egna turer."; return; }
     const btn=$("#tpSave"); btn.disabled=true; btn.innerHTML=`<span class="spin"></span> Sparar…`;
     try{
-      const lake = await resolveLake(sel.value, nw.value.trim(), null);
-      const changed = !edit || edit.started_at!==s.toISOString() || (edit.ended_at||null)!==(en?en.toISOString():null) || edit.lake_id!==(lake?.id||null);
-      const row = { member_id:$("#tpWho").value, lake_id:lake?.id||null, started_at:s.toISOString(), ended_at:en?en.toISOString():null, note:$("#tpNote").value.trim(),
-        ...(changed ? { weather:null, weather_status:"pending", lat: lake?.lat ?? edit?.lat ?? null, lon: lake?.lon ?? edit?.lon ?? null } : {}) };
+      const lake = tpLocked ? null : hide ? resolveHiddenLake(sel.value, nw.value.trim(), null) : await resolveLake(sel.value, nw.value.trim(), null);
+      const lakeChanged = !tpLocked && (!edit || edit.lake_id!==(lake?.id||null) || (!lake?.id && (edit.lake_name||null)!==(lake?.name||null)));
+      const changed = !edit || edit.started_at!==s.toISOString() || (edit.ended_at||null)!==(en?en.toISOString():null) || lakeChanged;
+      const row = { member_id:who, started_at:s.toISOString(), ended_at:en?en.toISOString():null, note:$("#tpNote").value.trim(),
+        ...(tpLocked ? {} : { lake_id:lake?.id||null, hide_location:hide, ...(hide ? { lake_name:lake?.name||null } : {}) }),
+        ...(changed ? { weather:null, weather_status:"pending", ...(tpLocked ? {} : { lat: lake?.lat ?? edit?.lat ?? null, lon: lake?.lon ?? edit?.lon ?? null }) } : {}) };
       let t = edit ? await dbUpdate("trips", edit.id, row) : await dbInsert("trips", row);
       await linkCatches(t);
       if (t.ended_at && t.weather_status==="pending"){ const p = await weatherForTrip(t); if (p) t = await dbUpdate("trips", t.id, p); }
@@ -532,10 +614,10 @@ function tripForm(edit=null){
 }
 function openTrip(id){
   const t = byId(S.trips, id); if (!t) return;
-  const m=member(t.member_id), l=byId(S.lakes,t.lake_id), st=tripStats(t), s=Date.parse(t.started_at);
+  const m=member(t.member_id), st=tripStats(t), s=Date.parse(t.started_at);
   const periods = A.bitePeriods(st.cs, { min: 2, gapMin: 30 });
   const w = t.weather ? A.weatherAt(t.weather, s) : null;
-  const host = openOverlay(`<div class="sheet-head"><h2>${esc(l?.name||"Tur")}</h2><button class="x" data-close aria-label="Stäng">${I.x}</button></div>
+  const host = openOverlay(`<div class="sheet-head"><h2>${esc(placeName("trips",t)||"Tur")}</h2><button class="x" data-close aria-label="Stäng">${I.x}</button></div>
     <div style="display:grid;gap:16px">
       <div class="who">${avatar(m,"sm")}${esc(m?.name||"")} · ${esc(fmtDay(s))} ${fmtTime(s)}–${t.ended_at?fmtTime(Date.parse(t.ended_at)):"pågår"}</div>
       <div class="tiles" style="grid-template-columns:repeat(3,1fr)">
@@ -543,6 +625,7 @@ function openTrip(id){
         <div class="tile"><span class="label">Fångster</span><span class="v">${st.cs.length}</span></div>
         <div class="tile"><span class="label">Per timme</span><span class="v">${st.dur>=30*60000?fmt1(st.rate):"–"}</span></div>
       </div>
+      ${t.hide_location?`<p class="muted" style="margin:0;display:flex;gap:6px;align-items:center">${lockTag(t)}${ownsLoc("trips",t)?"Platsen är dold för kompisarna. Bara du ser vattnet.":"Platsen är dold av "+esc(m?.name||"fiskaren")+"."}</p>`:""}
       ${t.note?`<p style="margin:0">${esc(t.note)}</p>`:""}
       ${t.weather ? `<section class="panel"><h3>Tidslinje</h3><p class="sub">Dygnet före och under turen. Grått fält är turen${periods.length?", orange fält är huggperioder":""}, prickarna är fångster.</p>${timeline(t, st.cs, periods)}
           ${w?`<div class="facts"><span>Vid start: ${w.tempC!=null?fmt1(w.tempC)+" °C":""}</span><span>${w.pressure!=null?Math.round(w.pressure)+" hPa":""}</span><span>Tryck 24 h: ${fmtDelta(w.pressureDelta24h,"hPa")}</span><span>Vind ${windDirTxt(w.windDir)} ${w.windMs!=null?fmt1(w.windMs)+" m/s":""}</span></div>`:""}</section>`
@@ -686,7 +769,7 @@ function renderStats(){
     ${S.members.filter(m=>m.active).length>1?whoFilter("who"):""}
     <div class="seg" role="group" aria-label="Filtrera på art"><button class="chip small" data-sp="all" aria-pressed="${S.statSpecies==="all"}">Alla arter</button>${speciesAvail.map(s=>`<button class="chip small" data-sp="${esc(s)}" aria-pressed="${S.statSpecies===s}">${esc(s)}</button>`).join("")}</div>
     <div class="tiles">
-      <div class="tile"><span class="label">Fångster</span><span class="v">${list.length}</span><span class="s">${count(list,c=>c.lake_name).length} vatten</span></div>
+      <div class="tile"><span class="label">Fångster</span><span class="v">${list.length}</span><span class="s">${count(list,c=>placeName("catches",c)||null).length} vatten</span></div>
       <div class="tile"><span class="label">Fiskad tid</span><span class="v">${fmt1(fh.reduce((a,h)=>a+h.w,0))} h</span><span class="s">${tc.length && fh.length ? fmt1(tc.length/fh.reduce((a,h)=>a+h.w,0))+" fångster per timme" : "från avslutade turer"}</span></div>
       <div class="tile"><span class="label">Största</span><span class="v">${heaviest?esc(fmtKg(heaviest.weight_kg)):"–"}</span><span class="s">${heaviest?esc(heaviest.species+", "+(member(heaviest.member_id)?.name||"")):"Ingen vägd fisk"}</span></div>
       <div class="tile"><span class="label">Återutsatt</span><span class="v">${rel}%</span><span class="s">catch &amp; release</span></div>
@@ -705,7 +788,7 @@ function renderStats(){
       <section class="panel"><h3>Vattentemperatur</h3><p class="sub">${wt.length} av ${list.length} fångster har vattentemp${wt.length?` · snitt ${fmt1(wt.reduce((a,b)=>a+b,0)/wt.length)} °C`:""}</p>${wt.length?hbars([["Under 8 °C",wt.filter(v=>v<8).length],["8–12 °C",wt.filter(v=>v>=8&&v<12).length],["12–16 °C",wt.filter(v=>v>=12&&v<16).length],["16–20 °C",wt.filter(v=>v>=16&&v<20).length],["20 °C och över",wt.filter(v=>v>=20).length]],5):`<p class="muted" style="margin:0">Fyll i vattentemp när du registrerar fångster så syns det här.</p>`}</section>
       <section class="panel"><h3>Bottendjup</h3><p class="sub">${S.statSpecies==="all"?"Alla arter":esc(S.statSpecies)} · ${bd.length} av ${list.length} fångster har bottendjup${bd.length?` · snitt ${avg(bd)} m`:""}</p>${bd.length?depthBars(bd):`<p class="muted" style="margin:0">Fyll i bottendjupet när du registrerar fångster så syns det här.</p>`}</section>
       <section class="panel"><h3>Djup där fisken högg</h3><p class="sub">${S.statSpecies==="all"?"Alla arter":esc(S.statSpecies)} · ${fd.length} av ${list.length} fångster${fd.length?` · snitt ${avg(fd)} m`:""}</p>${fd.length?depthBars(fd):`<p class="muted" style="margin:0">Fyll i ungefär hur djupt fisken högg så syns det här.</p>`}</section>
-      <section class="panel"><h3>Vatten</h3><p class="sub">Fångster per sjö eller plats</p>${hbars(count(list,c=>c.lake_name))}</section>
+      <section class="panel"><h3>Vatten</h3><p class="sub">Fångster per sjö eller plats</p>${hbars(count(list,c=>placeName("catches",c)||null))}</section>
       <section class="panel"><h3>Månfas</h3><p class="sub">Fångster per månfas</p>${hbars(count(list,c=>c.moon?.phase))}</section>
     </div>
   </div>`;
@@ -732,7 +815,7 @@ function renderPatterns(list, fh, tc){
           : `<p class="muted" style="margin:0">${H_ ? "Inga kombinationer sticker ut än. Det krävs minst 3 fångster och 3 timmar för varje kombination." : "Visas när ni har loggat turer."}</p>`}</section>
       <section class="panel" style="grid-column:1/-1"><h3>Huggperioder</h3><p class="sub">Minst 3 fångster på samma vatten med högst 45 minuter emellan. Orange etiketter är förhållanden som är ovanliga under er fiskade tid.</p>
         ${summary.length?`<p class="insight" style="margin:0">I huggperioderna är det oftare ${summary.map(s=>`<b>${esc(s.f.text(s.v).toLowerCase())}</b> (${Math.round(s.pShare*100)} % mot ${Math.round(s.hShare*100)} % av er fiskade tid)`).join(", ")}.</p>`:""}
-        ${periods.length ? `<div class="list">${periods.slice(0,8).map(p=>{ const un = A.unusualFeatures(p.feats, fh), w=p.w||{}; const lake=p.c0.lake_name||"Okänt vatten";
+        ${periods.length ? `<div class="list">${periods.slice(0,8).map(p=>{ const un = A.unusualFeatures(p.feats, fh), w=p.w||{}; const lake=placeName("catches",p.c0)||"Okänt vatten";
             const who=[...new Set(p.catches.map(c=>member(c.member_id)?.name).filter(Boolean))].join(", ");
             const fact=(k,txt)=>txt?`<span class="${un[k]!=null?"hi":""}">${esc(txt)}</span>`:"";
             return `<button class="period" ${p.c0.trip_id?`data-trip-open="${esc(p.c0.trip_id)}"`:`data-open="${esc(p.c0.id)}"`}><div class="hd"><b>${esc(lake)} · ${esc(fmtDay(p.start))} ${fmtTime(p.start)}–${fmtTime(p.end)}</b><span class="muted">${p.catches.length} fångster · ${esc(who)}</span></div>
@@ -958,7 +1041,7 @@ function download(name, text, type){
 function exportData(kind){
   const day=new Date().toISOString().slice(0,10);
   if (kind==="json"){ download(`fangstboken-${day}.json`, JSON.stringify({ exportedAt:new Date().toISOString(), members:S.members, lakes:S.lakes, baits:S.baits, trips:S.trips, catches:S.catches }, null, 1), "application/json"); return; }
-  const cols=[["Tid",c=>c.time],["Fiskare",c=>member(c.member_id)?.name],["Art",c=>c.species],["Vikt g",c=>c.weight_kg!=null?Math.round(c.weight_kg*1000):null],["Längd cm",c=>c.length_cm],["Bottendjup m",c=>c.depth_m],["Högg på m",c=>c.fish_depth_m],["Vatten",c=>c.lake_name],["Bete",c=>baitName(c)],["Teknik",c=>c.technique],["Återutsatt",c=>c.released?"ja":"nej"],["Vattentemp",c=>c.water_temp_c],
+  const cols=[["Tid",c=>c.time],["Fiskare",c=>member(c.member_id)?.name],["Art",c=>c.species],["Vikt g",c=>c.weight_kg!=null?Math.round(c.weight_kg*1000):null],["Längd cm",c=>c.length_cm],["Bottendjup m",c=>c.depth_m],["Högg på m",c=>c.fish_depth_m],["Vatten",c=>placeName("catches",c)],["Bete",c=>baitName(c)],["Teknik",c=>c.technique],["Återutsatt",c=>c.released?"ja":"nej"],["Vattentemp",c=>c.water_temp_c],
     ["Lufttemp",c=>c.weather?.tempC],["Lufttryck",c=>c.weather?.pressure],["Tryck 3h",c=>c.weather?.pressureDelta3h],["Tryck 24h",c=>c.weather?.pressureDelta24h],["Vind m/s",c=>c.weather?.windMs],["Vindriktning",c=>c.weather?.windDir],["Moln %",c=>c.weather?.cloudPct],["Nederbörd mm",c=>c.weather?.precipMm],["Ljus",c=>c.light],["Månfas",c=>c.moon?.phase],["Lat",c=>c.lat],["Lon",c=>c.lon],["Anteckning",c=>c.note]];
   const q=v=>{ if(v==null) return ""; const s=String(typeof v==="number"?String(v).replace(".",","):v); return /[;"\n]/.test(s)?`"${s.replace(/"/g,'""')}"`:s; };
   download(`fangster-${day}.csv`, "﻿"+[cols.map(c=>c[0]).join(";"), ...S.catches.map(c=>cols.map(([,f])=>q(f(c))).join(";"))].join("\n"), "text/csv;charset=utf-8");
@@ -991,7 +1074,7 @@ function renderBaits(){
 function bindBaitList(){ $$("#baitListBox [data-bait-open]").forEach(b=>b.onclick=()=>openBait(b.dataset.baitOpen)); hydratePhotos($("#baitListBox")||document); }
 function openBait(id){
   const b=byId(S.baits,id); if(!b) return; const s=baitStats(b), o=member(b.owner);
-  const lakes=count(s.cs,c=>c.lake_name), hrs=count(s.cs,c=>new Date(c.time).getHours());
+  const lakes=count(s.cs,c=>placeName("catches",c)||null), hrs=count(s.cs,c=>new Date(c.time).getHours());
   const host=openOverlay(`<div class="sheet-head"><h2>${esc(b.name)}</h2><button class="x" data-close aria-label="Stäng">${I.x}</button></div>
     <div style="display:grid;gap:16px">
       <div style="display:grid;grid-template-columns:96px 1fr;gap:14px;align-items:center">${baitThumb(b,"bthumb lg")}<div style="display:grid;gap:4px"><span>${esc(baitDesc(b)||"Ingen beskrivning")}</span>${b.brand?`<span class="muted">${esc(b.brand)}</span>`:""}<span class="who">${o?avatar(o,"sm")+esc(o.name)+"s bete":"Gemensamt bete"}</span></div></div>
@@ -1077,10 +1160,10 @@ function openDetail(id){
   const c=byId(S.catches,id); if(!c) return; const m=member(c.member_id), w=c.weather, tr=c.trip_id?byId(S.trips,c.trip_id):null;
   const sol = c.lat!=null ? A.solunar(Date.parse(c.time), c.lat, c.lon) : null;
   const rows=[
-    ["Fiskare",esc(m?.name||"Tidigare medlem")],["Tid",esc(fmtDateLong(c.time))],["Vatten",esc(c.lake_name||"–")],
+    ["Fiskare",esc(m?.name||"Tidigare medlem")],["Tid",esc(fmtDateLong(c.time))],["Vatten",c.hide_location?`${esc(placeName("catches",c))} ${lockTag(c)}<br><span class="muted" style="font-size:13px">${ownsLoc("catches",c)?"Dold för kompisarna. Bara du ser platsen.":"Platsen är dold av "+esc(m?.name||"fiskaren")+"."}</span>`:esc(placeName("catches",c)||"–")],
     ["Vikt",esc(fmtKg(c.weight_kg)||"–")],["Längd",c.length_cm?fmt1(c.length_cm)+" cm":"–"],["Bete",c.bait_id&&baitDoc(c)?`<button class="chip small" data-bait-open="${esc(c.bait_id)}">${esc(baitName(c))}</button>`:esc(baitName(c)||"–")],["Teknik",esc(c.technique||"–")],
     ["Återutsatt",c.released?"Ja":"Nej"],["Bottendjup",c.depth_m!=null?fmt1(c.depth_m)+" m":"–"],["Högg på",c.fish_depth_m!=null?"ca "+fmt1(c.fish_depth_m)+" m":"–"],["Vattentemp",c.water_temp_c!=null?fmt1(c.water_temp_c)+" °C":"–"],
-    ...(tr?[["Tur",`<button class="chip small" data-trip-open="${esc(tr.id)}">${esc(byId(S.lakes,tr.lake_id)?.name||"Tur")} ${fmtTime(Date.parse(tr.started_at))}–${tr.ended_at?fmtTime(Date.parse(tr.ended_at)):"nu"}</button>`]]:[]),
+    ...(tr?[["Tur",`<button class="chip small" data-trip-open="${esc(tr.id)}">${esc(placeName("trips",tr)||"Tur")} ${fmtTime(Date.parse(tr.started_at))}–${tr.ended_at?fmtTime(Date.parse(tr.ended_at)):"nu"}</button>`]]:[]),
     ...(w?[["Luft",w.tempC!=null?fmt1(w.tempC)+" °C"+(w.tempDelta24h!=null?` (${fmtDelta(w.tempDelta24h,"°")} på ett dygn)`:""):"–"],
       ["Lufttryck",w.pressure!=null?Math.round(w.pressure)+" hPa"+(w.pressureTrend?", "+esc(w.pressureTrend):""):"–"],
       ["Tryckändring",`${fmtDelta(w.pressureDelta3h,"hPa")} på 3 h · ${fmtDelta(w.pressureDelta24h,"hPa")} på 24 h`],
@@ -1111,14 +1194,16 @@ function topSpecies(){ return [...new Set([...count(S.catches,c=>c.species).map(
 function openForm(edit=null){
   const F={ file:null, lat:edit?.lat??null, lon:edit?.lon??null, exifTime:false, exifGps:false, phone:null, phoneGps:false, lakeTouched:!!edit, species:edit?.species||"", technique:edit?.technique||"", saving:false, newBaitType:"" };
   const lastMine=S.catches.find(c=>c.member_id===S.me.id), baits=recentBaits(), sp=topSpecies();
+  const lockedLoc = !!edit && !!edit.hide_location && !ownsLoc("catches", edit);
+  const hideDefault = edit ? !!edit.hide_location : !!activeTrip(S.me.id)?.hide_location;
   const host=openOverlay(`<div class="sheet-head"><h2>${edit?"Redigera fångst":"Ny fångst"}</h2><button class="x" data-close aria-label="Stäng">${I.x}</button></div>
   <form class="form" id="cf" novalidate>
     <div class="field"><label class="photo-drop" id="drop" for="photoCam">${edit?.photo?photoImg(edit.photo,"","pv"):`<span class="hint">${I.cam}<b>Ta en bild</b><span>Tid och plats läses från fotot när det går</span></span>`}</label>
       <div class="photo-btns"><label class="btn" for="photoCam">${I.cam.replace("<svg","<svg width=18 height=18")} Ta bild</label><label class="btn" for="photoLib"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="3"/><path d="M3 15l5-4 4 3 3-2 6 4"/><circle cx="16" cy="9" r="1.6"/></svg> Välj bild</label></div>
       <input type="file" id="photoCam" accept="image/*" capture="environment" hidden aria-label="Ta bild med kameran"><input type="file" id="photoLib" accept="image/*" hidden aria-label="Välj bild ur galleriet">
       <div class="auto" id="auto"></div></div>
-    <div class="field"><span class="label">Art</span><div class="chips" id="spChips">${sp.slice(0,9).map(s=>`<button type="button" class="chip" data-v="${esc(s)}" aria-pressed="${F.species===s}">${esc(s)}</button>`).join("")}</div>
-      <input class="inp" id="spOther" list="spList" placeholder="Annan art" value="${esc(sp.slice(0,9).includes(F.species)?"":F.species)}"><datalist id="spList">${sp.map(s=>`<option value="${esc(s)}">`).join("")}</datalist></div>
+    <div class="field"><span class="label">Art</span><div class="chips" id="spChips">${sp.slice(0,SPECIES_CHIPS).map(s=>`<button type="button" class="chip" data-v="${esc(s)}" aria-pressed="${F.species===s}">${esc(s)}</button>`).join("")}</div>
+      <input class="inp" id="spOther" list="spList" placeholder="Annan art" value="${esc(sp.slice(0,SPECIES_CHIPS).includes(F.species)?"":F.species)}"><datalist id="spList">${sp.map(s=>`<option value="${esc(s)}">`).join("")}</datalist></div>
     <div class="row2"><div class="field"><label for="fKg">Vikt (g)</label><input class="inp num" id="fKg" inputmode="numeric" placeholder="850" value="${edit?.weight_kg!=null?Math.round(edit.weight_kg*1000):""}"></div>
       <div class="field"><label for="fCm">Längd (cm)</label><input class="inp num" id="fCm" inputmode="decimal" placeholder="42" value="${edit?.length_cm!=null?String(edit.length_cm).replace(".",","):""}"></div></div>
     <div class="field"><label for="fBait">Bete</label><input class="inp" id="fBait" list="baitList" placeholder="Sök i betesboxen eller skriv nytt" value="${esc(edit?baitName(edit):"")}" autocomplete="off">
@@ -1133,7 +1218,10 @@ function openForm(edit=null){
     <div class="row2"><div class="field"><label for="fDepth">Bottendjup (m)</label><input class="inp num" id="fDepth" inputmode="decimal" placeholder="8,5" value="${edit?.depth_m!=null?String(edit.depth_m).replace(".",","):""}"></div>
       <div class="field"><label for="fFishDepth">Fisken högg på (m)</label><input class="inp num" id="fFishDepth" inputmode="decimal" placeholder="ca 6" value="${edit?.fish_depth_m!=null?String(edit.fish_depth_m).replace(".",","):""}"></div></div>
     <span class="muted" style="font-size:13px;margin-top:-8px">Bottendjupet från ekolodet. Djupet fisken högg på räcker som en uppskattning. Båda är valfria.</span>
-    <div class="field"><label for="fLake">Vatten</label>${lakeSelect("fLake", edit?.lake_id||activeTrip(S.me.id)?.lake_id||"")}<input class="inp" id="fLakeNew" placeholder="Namn på sjö eller plats" hidden maxlength="60"><span class="muted" id="lakeHint" style="font-size:13px"></span></div>
+    ${lockedLoc?`<div class="field"><span class="label">Vatten</span><p class="muted" style="margin:0;display:flex;gap:6px;align-items:center">${lockTag(edit)}Platsen är dold av ${esc(member(edit.member_id)?.name||"fiskaren")} och kan bara ändras av hen.</p></div>`
+    :`<div class="field"><label for="fLake">Vatten</label>${lakeSelect("fLake", edit?.lake_id||(edit?.lake_name?"__new":"")||activeTrip(S.me.id)?.lake_id||"")}<input class="inp" id="fLakeNew" placeholder="Namn på sjö eller plats" ${edit&&!edit.lake_id&&edit.lake_name?"":"hidden"} maxlength="60" value="${esc(edit&&!edit.lake_id?edit.lake_name||"":"")}"><span class="muted" id="lakeHint" style="font-size:13px"></span></div>
+    <div class="hidebox"><div class="toggle"><label for="fHide" style="font-weight:600;display:flex;gap:6px;align-items:center">${I.lock.replace("<svg",'<svg width="16" height="16"')} Dölj plats för kompisarna</label><input type="checkbox" class="switch" id="fHide" ${hideDefault?"checked":""}></div>
+      <span class="muted" id="hideHint">Kompisarna ser fisken, bilden och vädret, men inte vatten eller position. Ingen annan än du kan se platsen, inte heller admin. Hör fångsten till en tur döljs även turens plats.</span></div>`}
     <div class="field"><label for="fTime">Tid</label><input class="inp" type="datetime-local" id="fTime" value="${toLocalInput(edit?new Date(edit.time):new Date())}"></div>
     <div class="field"><label for="fAngler">Fiskare</label><select class="inp" id="fAngler">${S.members.filter(m=>m.active||m.id===edit?.member_id).map(m=>`<option value="${esc(m.id)}" ${m.id===(edit?.member_id||S.me.id)?"selected":""}>${esc(m.name)}</option>`).join("")}</select></div>
     <div class="toggle"><label for="fRel" style="font-weight:600">Återutsatt (catch &amp; release)</label><input type="checkbox" class="switch" id="fRel" ${edit?.released?"checked":""}></div>
@@ -1157,14 +1245,14 @@ function openForm(edit=null){
     if (use && !F.phoneGps){ F.lat=F.phone.lat; F.lon=F.phone.lon; F.phoneGps=true; auto(); if (!F.lakeTouched) matchLake(); }
     else if (!use && F.phoneGps){ F.lat=null; F.lon=null; F.phoneGps=false; auto(); if (!F.lakeTouched) matchLake(); }
   };
-  const setLake=()=>{ const sel=$("#fLake"), nw=$("#fLakeNew"); nw.hidden = sel.value!=="__new"; };
-  const matchLake=()=>{ const hint=$("#lakeHint");
+  const setLake=()=>{ const sel=$("#fLake"), nw=$("#fLakeNew"); if (sel) nw.hidden = sel.value!=="__new"; };
+  const matchLake=()=>{ const hint=$("#lakeHint"); if (!hint) return;
     if (F.lat==null){ hint.textContent=F.file?"Ingen position. Välj vatten själv, så används vattnets position.":""; return; }
     const m=nearestLake(F.lat,F.lon);
     if (m){ $("#fLake").value=m.lake.id; hint.textContent=`Känns igen: ${m.lake.name} (${m.d<1?Math.round(m.d*1000)+" m":fmt1(m.d)+" km"} bort)`; }
-    else { $("#fLake").value="__new"; hint.textContent="Nytt ställe. Skriv namnet en gång så känns det igen nästa gång."; }
+    else { $("#fLake").value="__new"; hint.textContent=$("#fHide")?.checked?"Nytt ställe. Dolda platser sparas inte i den gemensamma vattenlistan.":"Nytt ställe. Skriv namnet en gång så känns det igen nästa gång."; }
     setLake(); };
-  $("#fLake").onchange=()=>{ F.lakeTouched=true; setLake(); };
+  if ($("#fLake")) $("#fLake").onchange=()=>{ F.lakeTouched=true; setLake(); };
   $("#fTime").addEventListener("change", applyPhone);
   if (!edit) getPosition().then(p=>{ F.phone=p; if ($("#cf")) applyPhone(); });
   const chipGroup=(id,key)=>$(id).querySelectorAll("[data-v]").forEach(b=>b.onclick=()=>{ F[key]=F[key]===b.dataset.v?"":b.dataset.v; $(id).querySelectorAll("[data-v]").forEach(x=>x.setAttribute("aria-pressed",x.dataset.v===F[key])); if(key==="species") $("#spOther").value=""; });
@@ -1175,7 +1263,7 @@ function openForm(edit=null){
   host.querySelectorAll("[data-bait]").forEach(b=>b.onclick=()=>{ $("#fBait").value=b.dataset.bait; baitCheck(); });
   $("#nbType").querySelectorAll("[data-v]").forEach(b=>b.onclick=()=>{ F.newBaitType=F.newBaitType===b.dataset.v?"":b.dataset.v; $("#nbType").querySelectorAll("[data-v]").forEach(x=>x.setAttribute("aria-pressed",x.dataset.v===F.newBaitType)); });
   baitCheck(); bindPicker("nbp", f=>{ F.baitFile=f; });
-  if (edit) $("#lakeHint").textContent=edit.lat!=null?`Position ${Number(edit.lat).toFixed(3)}, ${Number(edit.lon).toFixed(3)}`:"";
+  if (edit && $("#lakeHint")) $("#lakeHint").textContent=edit.lat!=null?`Position ${Number(edit.lat).toFixed(3)}, ${Number(edit.lon).toFixed(3)}`:"";
   const onPhoto=async(e)=>{
     const file=e.target.files?.[0]; if(!file) return;
     F.file=file; F.exifTime=false; if (F.exifGps){ F.exifGps=false; F.lat=null; F.lon=null; }
@@ -1203,13 +1291,15 @@ function openForm(edit=null){
     if (depth_m!=null && fish_depth_m!=null && fish_depth_m>depth_m+0.5){ err.textContent="Fisken kan inte ha huggit djupare än botten. Kontrollera djupen."; return; }
     if (water_temp_c!=null && !(water_temp_c>=-2 && water_temp_c<=35)){ err.textContent="Vattentemperaturen ska vara ett tal mellan −2 och 35 °C."; return; }
     const t=$("#fTime").value?new Date($("#fTime").value):new Date(); if (isNaN(t)){ err.textContent="Ange en giltig tid."; return; }
-    const lakeSel=$("#fLake").value, newName=$("#fLakeNew").value.trim();
+    const lakeSel=lockedLoc?"":$("#fLake").value, newName=lockedLoc?"":$("#fLakeNew").value.trim();
+    const hide=lockedLoc ? true : !!$("#fHide")?.checked;
     if (lakeSel==="__new" && !newName){ err.textContent="Skriv namnet på vattnet eller välj ett sparat."; return; }
     F.saving=true; const btn=$("#fSave"); btn.disabled=true; btn.innerHTML=`<span class="spin"></span> Sparar…`;
     try{
       let photo=edit?.photo||null;
-      if (F.file){ btn.innerHTML=`<span class="spin"></span> Laddar upp bild…`; photo=await S.api.upload(await shrink(F.file)); }
-      const lake = await resolveLake(lakeSel, newName, (F.exifGps||F.phoneGps)?{lat:F.lat,lon:F.lon}:null);
+      if (F.file){ btn.innerHTML=`<span class="spin"></span> Laddar upp bild…`; photo=await S.api.upload(await shrink(F.file, hide)); }
+      const pos=(F.exifGps||F.phoneGps)?{lat:F.lat,lon:F.lon}:null;
+      const lake = lockedLoc ? null : hide ? resolveHiddenLake(lakeSel, newName, pos) : await resolveLake(lakeSel, newName, pos);
       const baitText=$("#fBait").value.trim(); let bait_id=null, bait=baitText;
       if (baitText){ const b=findBaitByName(baitText);
         if (b){ bait_id=b.id; bait=b.name; } else {
@@ -1219,14 +1309,16 @@ function openForm(edit=null){
       if (lat==null && lake?.lat!=null){ lat=lake.lat; lon=lake.lon; pos_source="lake"; }
       const member_id=$("#fAngler").value, timeISO=t.toISOString();
       const trip = tripFor(member_id, t.getTime());
-      const moved = !edit || edit.time!==timeISO || edit.lat!==lat || edit.lon!==lon;
+      const moved = !edit || (!lockedLoc && (edit.time!==timeISO || edit.lat!==lat || edit.lon!==lon));
       const row={ member_id, species, bait, bait_id, technique:F.technique, weight_kg, length_cm, water_temp_c, depth_m, fish_depth_m, released:$("#fRel").checked, note:$("#fNote").value.trim(),
-        time:timeISO, lat, lon, pos_source, lake_id:lake?.id||null, lake_name:lake?.name||null, photo, trip_id: trip?.id || null,
-        light: A.light(t,lat,lon), moon: A.moonPhase(t) };
+        time:timeISO, ...(lockedLoc ? {} : { lat, lon, pos_source, lake_id:lake?.id||null, lake_name:lake?.name||null, hide_location:hide }), photo, trip_id: trip?.id || null,
+        ...(lockedLoc ? {} : { light: A.light(t,lat,lon) }), moon: A.moonPhase(t) };
       if (moved){ btn.innerHTML=`<span class="spin"></span> Hämtar väder…`; Object.assign(row, await weatherForCatch(row).catch(()=>({ weather:null, weather_status: lat!=null?"pending":"nopos" }))); }
       if (edit) await dbUpdate("catches", edit.id, row); else await dbInsert("catches", { ...row, created_by: S.me.id });
       if (edit?.photo && photo!==edit.photo && !S.catches.some(x=>x.photo===edit.photo)) S.api.removePhoto(edit.photo).catch(()=>{});
-      if (trip && trip.lat==null && lat!=null) dbUpdate("trips", trip.id, { lat, lon }).catch(()=>{});
+      if (trip && hide && !lockedLoc && !trip.hide_location && ownsLoc("trips", trip)) await dbUpdate("trips", trip.id, { hide_location:true }).catch(()=>{});
+      const tr2 = trip ? byId(S.trips, trip.id) : null;
+      if (tr2 && tr2.lat==null && lat!=null && !lockedLoc && (!hide || tr2.hide_location)) dbUpdate("trips", tr2.id, { lat, lon }).catch(()=>{});
       closeOverlay(); if (S.tab!=="trips") S.tab="feed"; render(); toast(edit?"Ändringarna är sparade":`${species} sparad`);
     }catch(ex){ F.saving=false; btn.disabled=false; btn.textContent=edit?"Spara ändringar":"Spara fångst"; err.textContent=errText(ex); }
   };

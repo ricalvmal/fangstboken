@@ -182,7 +182,8 @@ export function topCombos(hours, tripCatches, { minHours = 3, minCatches = 3, li
 // ---------- Huggperioder ----------
 // Minst `min` fångster på samma vatten där det går högst `gapMin` minuter mellan varje.
 export function bitePeriods(catches, { gapMin = 45, min = 3 } = {}) {
-  const key = c => c.lake_id || (c.lat != null ? c.lat.toFixed(2) + "," + c.lon.toFixed(2) : "okänt");
+  // Dolda platser saknar vatten och position för kompisarna. Gruppera dem per tur eller fiskare, så att olika platser inte blandas ihop.
+  const key = c => c.lake_id || (c.lat != null ? c.lat.toFixed(2) + "," + c.lon.toFixed(2) : c.hide_location ? "dold:" + (c.trip_id || c.member_id) : "okänt");
   const groups = new Map();
   for (const c of catches) { const k = key(c); if (!groups.has(k)) groups.set(k, []); groups.get(k).push(c); }
   const out = [];
