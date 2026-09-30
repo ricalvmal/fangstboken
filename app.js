@@ -104,6 +104,7 @@ async function makeSupabaseApi(cfg){
       chk(await sb.auth.updateUser({ password: next }));
     },
     async adminSetPassword(email, pw){ chk(await sb.rpc("admin_set_password", { target_email: email, new_password: pw })); },
+    async markSeen(){ chk(await sb.rpc("mark_seen")); },
     fetchWeather: openMeteo,
   };
 }
@@ -197,6 +198,7 @@ async function afterAuth(){
   await loadAll();
   if (!S.subscribed){ S.subscribed = true; S.api.subscribe(onChange); }
   render();
+  markSeen();
   backfillWeather();
 }
 async function loadAll(){
@@ -805,7 +807,29 @@ function statusLine(m){
   if (!S.status) return `<span>Hämtar status…</span>`;
   const st = S.status[m.email.toLowerCase()];
   if (!st) return `<span style="color:var(--warn)">Har inte skapat konto än</span>`;
-  return st.last_sign_in_at ? `<span style="color:var(--good)">Har konto · senast inloggad ${esc(fmtDate(st.last_sign_in_at))}</span>` : `<span>Har konto men har inte loggat in</span>`;
+  return st.last_sign_in_at ? `<span style="color:var(--good)">Har konto · senast inloggad med lösenord ${esc(fmtDate(st.last_sign_in_at))}</span>` : `<span>Har konto men har inte loggat in</span>`;
+}
+// Senast aktiv (alla ser). Appen sparar en tidsstämpel när den öppnas eller kommer tillbaka i förgrunden.
+const SEEN_EVERY = 10 * 60000;
+function markSeen(){
+  if (!S.me || !S.api?.markSeen) return;
+  const key = "fb.seen." + S.me.id, last = Number(ls.get(key) || 0);
+  if (Date.now() - last < SEEN_EVERY) return;
+  ls.set(key, String(Date.now()));
+  S.api.markSeen().catch(() => {});
+}
+function fmtSeen(iso){
+  const d = new Date(iso), t = d.toLocaleTimeString("sv-SE",{hour:"2-digit",minute:"2-digit"});
+  const day = (x) => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime();
+  const diff = Math.round((day(new Date()) - day(d)) / 864e5);
+  if (diff <= 0) return `i dag ${t}`;
+  if (diff === 1) return `i går ${t}`;
+  if (diff < 7) return `${d.toLocaleDateString("sv-SE",{weekday:"long"})} ${t}`;
+  return d.toLocaleDateString("sv-SE",{day:"numeric",month:"short",...(d.getFullYear()!==new Date().getFullYear()?{year:"numeric"}:{})});
+}
+function seenLine(m){
+  if (!("last_seen_at" in m) || !m.active) return "";
+  return m.last_seen_at ? `<span>Senast aktiv ${esc(fmtSeen(m.last_seen_at))}</span>` : `<span class="muted">Ingen aktivitet registrerad än</span>`;
 }
 async function loadStatus(force=false){
   if (!S.me?.is_admin || !S.api.memberStatus) return;
@@ -819,7 +843,7 @@ function renderGang(){
   setTimeout(() => loadStatus(), 0);
   const admin = S.me.is_admin;
   return `<div class="view" style="max-width:720px"><div class="section-head"><h2>Fiskekompisar</h2><span class="muted num">${S.members.filter(m=>m.active).length} fiskare</span></div>
-    <div class="list">${S.members.slice().sort((a,b)=>(b.active-a.active)||a.name.localeCompare(b.name,"sv")).map(m=>`<div class="row mrow" style="${m.active?"":"opacity:.55"}">${avatar(m)}<div class="grow"><b>${esc(m.name)}${m.is_admin?` <span class="tag-unsure">admin</span>`:""}${m.active?"":` <span class="tag-unsure">inaktiv</span>`}</b><span>${esc(m.email)}</span>${admin?statusLine(m):""}</div>
+    <div class="list">${S.members.slice().sort((a,b)=>(b.active-a.active)||a.name.localeCompare(b.name,"sv")).map(m=>`<div class="row mrow" style="${m.active?"":"opacity:.55"}">${avatar(m)}<div class="grow"><b>${esc(m.name)}${m.is_admin?` <span class="tag-unsure">admin</span>`:""}${m.active?"":` <span class="tag-unsure">inaktiv</span>`}</b><span>${esc(m.email)}</span>${seenLine(m)}${admin?statusLine(m):""}</div>
       ${m.id===S.me.id?`<button class="btn ghost" data-rename>Byt namn</button>`:`<div class="mact">${m.active?`<button class="btn ghost" data-invite="${esc(m.id)}">Bjud in</button>`:""}${admin&&m.active&&S.status&&S.status[m.email.toLowerCase()]?`<button class="btn ghost" data-setpw="${esc(m.id)}">Nytt lösenord</button>`:""}${admin&&!m.is_admin?`<button class="btn ghost" data-toggle="${esc(m.id)}">${m.active?"Inaktivera":"Aktivera"}</button>`:""}</div>`}</div>`).join("")}</div>
     ${admin?`<form class="panel" id="addMember" novalidate><h3>Lägg till fiskare</h3><p class="sub">Personen skapar sedan ett konto i appen med samma e-postadress och ett eget lösenord.</p>
       <div class="row2"><div class="field"><label for="amName">Namn</label><input class="inp" id="amName" maxlength="30" autocomplete="off"></div><div class="field"><label for="amEmail">E-post</label><input class="inp" id="amEmail" type="email" autocomplete="off"></div></div>
@@ -1226,5 +1250,5 @@ setTopH(); window.addEventListener("resize", setTopH); document.fonts?.ready?.th
 $$(".tab").forEach(t=>t.onclick=()=>go(t.dataset.tab));
 $("#fab").onclick=()=>{ if (S.me) openForm(); };
 $("#meBtn").onclick=()=>go("gang");
-document.addEventListener("visibilitychange",()=>{ if (document.visibilityState==="visible" && S.me) backfillWeather(); });
+document.addEventListener("visibilitychange",()=>{ if (document.visibilityState==="visible" && S.me){ markSeen(); backfillWeather(); } });
 boot();
