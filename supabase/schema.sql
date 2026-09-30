@@ -1,5 +1,5 @@
 -- Fångstboken: databasen i Supabase.
--- Återskapad 2026-09-30 från den körande databasen, plus "Senast aktiv" (4-senast-aktiv.sql) (tabeller, regler, funktioner, trigger, realtid, bildlagring).
+-- Återskapad 2026-09-30 från den körande databasen, plus "Senast aktiv" (4-senast-aktiv.sql) och djup (5-djup.sql) (tabeller, regler, funktioner, trigger, realtid, bildlagring).
 --
 -- Kör hela filen i Supabase: SQL Editor -> New query -> klistra in -> Run.
 -- Filen går att köra flera gånger. Den skapar bara det som saknas och skriver om reglerna,
@@ -89,6 +89,8 @@ create table if not exists public.catches (
   weight_kg      numeric,
   length_cm      numeric,
   water_temp_c   numeric,
+  depth_m        numeric,
+  fish_depth_m   numeric,
   released       boolean not null default false,
   note           text not null default '',
   time           timestamptz not null,
@@ -106,6 +108,10 @@ create table if not exists public.catches (
   created_at     timestamptz not null default now(),
   updated_at     timestamptz not null default now()
 );
+
+-- Kolumner som lagts till efter att tabellerna skapades.
+alter table public.catches add column if not exists depth_m numeric;
+alter table public.catches add column if not exists fish_depth_m numeric;
 
 grant select, insert, update, delete on public.members, public.lakes, public.baits, public.trips, public.catches to authenticated;
 
