@@ -56,7 +56,7 @@ function openCatalog(){
 const COLORS = ["Röd","Orange","Chartreuse","Vit","Svart","Guld","Silver","Firetiger","Motor oil","Naturfärg"];
 const PCOLORS = ["var(--p1)","var(--p2)","var(--p3)","var(--p4)"];
 const LAKE_RADIUS_KM = 2.5;
-const TABLES = ["members","lakes","baits","trips","catches","catch_secrets","trip_secrets"];
+const TABLES = ["members","lakes","baits","trips","catches","catch_secrets","trip_secrets","catch_comments"];
 
 const $ = (s, r=document) => r.querySelector(s);
 const $$ = (s, r=document) => [...r.querySelectorAll(s)];
@@ -79,6 +79,7 @@ async function makeSupabaseApi(cfg){
       let q = sb.from(table).select("*");
       if (table === "catches") q = q.order("time", { ascending: false }).limit(5000);
       if (table === "trips") q = q.order("started_at", { ascending: false }).limit(3000);
+      if (table === "catch_comments") q = q.order("created_at", { ascending: true }).limit(20000);
       return chk(await q);
     },
     async insert(table, row){ return chk(await sb.from(table).insert(row).select().single()); },
@@ -129,7 +130,7 @@ async function openMeteo(lat, lon, fromMs, toMs){
 }
 
 // ---------- tillstånd ----------
-const S = { api:null, session:null, me:null, members:[], lakes:[], baits:[], trips:[], catches:[], catch_secrets:[], trip_secrets:[], loaded:false,
+const S = { api:null, session:null, me:null, members:[], lakes:[], baits:[], trips:[], catches:[], catch_secrets:[], trip_secrets:[], catch_comments:[], loaded:false,
   tab: ls.get("fb.tab") || "feed", who:"all", statSpecies:"all", feedWho:"all", factor:"trend3",
   baitType:"all", baitQ:"", baitSort:"catches", urls:{}, urlAt:0, authMode:"login", _hours:null, _feats:null };
 const member = (id) => S.members.find(m => m.id === id);
@@ -172,6 +173,7 @@ const I = {
   fish:`<svg viewBox="0 0 64 64" fill="currentColor"><path d="M6 32c8-11 19-15 29-11 4 1.7 7.5 4.6 10.3 7.8L55 21v22l-9.7-7.8C42.5 38.4 39 41.3 35 43 25 47 14 43 6 32z"/></svg>`,
   cam:`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 8h3l2-3h6l2 3h3a1 1 0 011 1v10a1 1 0 01-1 1H4a1 1 0 01-1-1V9a1 1 0 011-1z"/><circle cx="12" cy="13.5" r="3.8"/></svg>`,
   x:`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>`,
+  chat:`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a8 8 0 01-11.6 7.1L4 20.5l1.4-4.6A8 8 0 1121 12z"/></svg>`,
   eyeoff:`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3l18 18"/><path d="M10.6 5.1A10 10 0 0112 5c5 0 9 4.5 10 7-.4 1-1.3 2.4-2.6 3.7M6.3 6.3C4.2 7.7 2.7 9.9 2 12c1 2.5 5 7 10 7 1.9 0 3.6-.6 5-1.5"/><path d="M9.9 9.9a3 3 0 004.2 4.2"/></svg>`,
   lock:`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V8a4 4 0 018 0v3"/></svg>`,
   chev:`<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M9 6l6 6-6 6"/></svg>`,
@@ -219,7 +221,7 @@ function onChange(table){
   reloadT[table] = setTimeout(async () => {
     try{ S[table] = await S.api.load(table); if (LOC_TABLES.includes(table) || SEC_TABLES.includes(table)) applySecrets(); invalidate();
       if (table === "members"){ S.me = S.members.find(m => m.id === S.me?.id && m.active) || null; if (!S.me){ renderNotMember(); return; } }
-      render(); }catch(e){}
+      render(); refreshComments(); }catch(e){}
   }, 350);
 }
 // Uppdatera lokalt direkt efter egna ändringar, utan att vänta på realtid.
@@ -469,7 +471,7 @@ function card(c){
       <div class="meta"><span>${I.clock}${esc(fmtDate(c.time))}</span>${placeName("catches",c)?`<span>${I.pin}${esc(placeName("catches",c))}${lockTag(c)}</span>`:""}
         ${baitName(c)?`<span>${I.lure}${esc(baitName(c))}${c.technique?" · "+esc(c.technique):""}</span>`:""}</div>
       <div class="wx">${wxChips(c)}</div>
-      <div class="who">${avatar(m,"sm")}${esc(m?.name||"Tidigare medlem")}</div>
+      <div class="who">${avatar(m,"sm")}${esc(m?.name||"Tidigare medlem")}${(()=>{ const n=commentsFor(c.id).length; return n?`<span class="ccount" title="${n} ${n===1?"kommentar":"kommentarer"}">${I.chat}${n}</span>`:""; })()}</div>
     </div></button>`;
 }
 function whoFilter(key){
@@ -1041,7 +1043,7 @@ function download(name, text, type){
 }
 function exportData(kind){
   const day=new Date().toISOString().slice(0,10);
-  if (kind==="json"){ download(`fangstboken-${day}.json`, JSON.stringify({ exportedAt:new Date().toISOString(), members:S.members, lakes:S.lakes, baits:S.baits, trips:S.trips, catches:S.catches }, null, 1), "application/json"); return; }
+  if (kind==="json"){ download(`fangstboken-${day}.json`, JSON.stringify({ exportedAt:new Date().toISOString(), members:S.members, lakes:S.lakes, baits:S.baits, trips:S.trips, catches:S.catches, comments:S.catch_comments }, null, 1), "application/json"); return; }
   const cols=[["Tid",c=>c.time],["Fiskare",c=>member(c.member_id)?.name],["Art",c=>c.species],["Vikt g",c=>c.weight_kg!=null?Math.round(c.weight_kg*1000):null],["Längd cm",c=>c.length_cm],["Bottendjup m",c=>c.depth_m],["Högg på m",c=>c.fish_depth_m],["Vatten",c=>placeName("catches",c)],["Bete",c=>baitName(c)],["Teknik",c=>c.technique],["Återutsatt",c=>c.released?"ja":"nej"],["Vattentemp",c=>c.water_temp_c],
     ["Lufttemp",c=>c.weather?.tempC],["Lufttryck",c=>c.weather?.pressure],["Tryck 3h",c=>c.weather?.pressureDelta3h],["Tryck 24h",c=>c.weather?.pressureDelta24h],["Vind m/s",c=>c.weather?.windMs],["Vindriktning",c=>c.weather?.windDir],["Moln %",c=>c.weather?.cloudPct],["Nederbörd mm",c=>c.weather?.precipMm],["Ljus",c=>c.light],["Månfas",c=>c.moon?.phase],["Lat",c=>c.lat],["Lon",c=>c.lon],["Anteckning",c=>c.note]];
   const q=v=>{ if(v==null) return ""; const s=String(typeof v==="number"?String(v).replace(".",","):v); return /[;"\n]/.test(s)?`"${s.replace(/"/g,'""')}"`:s; };
@@ -1157,6 +1159,46 @@ async function resolveLake(sel, newName, pos){
   return l;
 }
 
+// ---------- kommentarer ----------
+// Gänget kommenterar varandras fångster. Databasen (8-kommentarer.sql) styr vem som får läsa, skriva och ta bort.
+const commentsFor = (cid) => S.catch_comments.filter(x => x.catch_id === cid).sort((a,b) => Date.parse(a.created_at) - Date.parse(b.created_at));
+const canDeleteComment = (cm, c) => S.me?.is_admin || cm.member_id === S.me?.id || ownsLoc("catches", c);
+function commentsHtml(c){
+  const list = commentsFor(c.id), draft = $("#cmText")?.value || "";
+  return `<h3>Kommentarer${list.length?` <span class="muted num" style="font-weight:500">${list.length}</span>`:""}</h3>
+    ${list.length ? `<div class="cmlist">${list.map(cm => { const a = member(cm.member_id); return `<div class="cm">${avatar(a,"sm")}<div class="cmb">
+        <div class="cmh"><b>${esc(a?.name||"Tidigare medlem")}</b><span class="muted">${esc(fmtSeen(cm.created_at))}</span>${canDeleteComment(cm,c)?`<button class="cmdel" data-cm-del="${esc(cm.id)}" aria-label="Ta bort kommentaren">${I.x}</button>`:""}</div>
+        <p>${esc(cm.body)}</p></div></div>`; }).join("")}</div>`
+      : `<p class="muted" style="margin:0;font-size:14px">${c.is_private ? "Fångsten är privat, så bara du ser kommentarerna." : "Inga kommentarer än. Skriv den första!"}</p>`}
+    <form class="cmform" id="cmForm" novalidate><textarea class="inp" id="cmText" rows="1" maxlength="1000" placeholder="Skriv en kommentar…">${esc(draft)}</textarea><button class="btn primary" type="submit" id="cmSend">Skicka</button></form>
+    <div class="err" id="cmErr" role="alert"></div>`;
+}
+function bindComments(cid){
+  const box = $("#cmBox"); if (!box) return;
+  const c = byId(S.catches, cid); if (!c){ box.remove(); return; }
+  const ta = $("#cmText"), grow = () => { ta.style.height = "auto"; ta.style.height = Math.min(ta.scrollHeight, 160) + "px"; };
+  ta.oninput = grow; grow();
+  ta.onkeydown = (e) => { if (e.key === "Enter" && !e.shiftKey && !e.isComposing){ e.preventDefault(); $("#cmForm").requestSubmit(); } };
+  $("#cmForm").onsubmit = async (e) => {
+    e.preventDefault(); const body = ta.value.trim(), err = $("#cmErr"); err.textContent = "";
+    if (!body){ ta.value = ""; grow(); return; }
+    const btn = $("#cmSend"); btn.disabled = true;
+    try{ await dbInsert("catch_comments", { catch_id: cid, body, member_id: S.me.id }); ta.value = ""; refreshComments(); render(); }
+    catch(ex){ err.textContent = errText(ex); btn.disabled = false; }
+  };
+  box.querySelectorAll("[data-cm-del]").forEach(b => b.onclick = async () => {
+    try{ await dbRemove("catch_comments", b.dataset.cmDel); refreshComments(); render(); }catch(ex){ toast(errText(ex)); }
+  });
+}
+// Rita om kommentarerna i en öppen fångst, till exempel när någon annan har kommenterat.
+function refreshComments(){
+  const box = $("#cmBox"); if (!box) return;
+  const c = byId(S.catches, box.dataset.cid); if (!c) return;
+  const focused = document.activeElement?.id === "cmText";
+  box.innerHTML = commentsHtml(c); bindComments(c.id);
+  if (focused){ const ta = $("#cmText"); ta.focus(); ta.setSelectionRange(ta.value.length, ta.value.length); }
+}
+
 function openDetail(id){
   const c=byId(S.catches,id); if(!c) return; const m=member(c.member_id), w=c.weather, tr=c.trip_id?byId(S.trips,c.trip_id):null;
   const sol = c.lat!=null ? A.solunar(Date.parse(c.time), c.lat, c.lon) : null;
@@ -1176,9 +1218,11 @@ function openDetail(id){
   ];
   const host=openOverlay(`<div class="sheet-head"><h2>${esc(c.species)}${c.weight_kg?` · ${esc(fmtKg(c.weight_kg))}`:""}</h2><button class="x" data-close aria-label="Stäng">${I.x}</button></div>
     <div style="display:grid;gap:16px">${photoImg(c.photo, c.species, "detail-img")}${c.note?`<p style="margin:0">${esc(c.note)}</p>`:""}
+      <section class="comments" id="cmBox" data-cid="${esc(c.id)}">${commentsHtml(c)}</section>
       <dl class="kv">${rows.map(([k,v])=>`<dt>${k}</dt><dd>${v}</dd>`).join("")}</dl>
       <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center"><button class="btn" id="dEdit">Redigera</button>${canDeleteCatch(c)?`<button class="btn danger ghost" id="dDel">Ta bort</button>`:`<span class="muted" style="font-size:13px">Bara ${esc(m?.name||"den som fångade den")} eller admin kan ta bort fångsten.</span>`}</div><div id="dConfirm"></div></div>`);
   hydratePhotos(host);
+  bindComments(c.id);
   $("#dEdit").onclick=()=>openForm(c);
   host.querySelectorAll("[data-bait-open]").forEach(b=>b.onclick=()=>openBait(b.dataset.baitOpen));
   host.querySelectorAll("[data-trip-open]").forEach(b=>b.onclick=()=>openTrip(b.dataset.tripOpen));

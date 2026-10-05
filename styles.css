@@ -354,3 +354,18 @@ a.btn.primary{color:var(--accent-ink)}
 .ph .tag.priv{display:inline-flex;gap:5px;align-items:center}
 .tag.priv svg{width:13px;height:13px}
 .hidebox.off{opacity:.45;pointer-events:none}
+/* Kommentarer */
+.ccount{margin-left:auto;display:inline-flex;align-items:center;gap:4px;color:var(--muted);font-size:13px;font-variant-numeric:tabular-nums}
+.ccount svg{width:15px;height:15px}
+.comments{display:grid;gap:12px;background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:14px}
+.comments h3{font-size:18px}
+.cmlist{display:grid;gap:12px}
+.cm{display:flex;gap:10px;align-items:flex-start}
+.cmb{flex:1;min-width:0}
+.cmh{display:flex;gap:8px;align-items:baseline;font-size:13.5px}
+.cmh .muted{font-size:12.5px}
+.cm p{margin:2px 0 0;font-size:14.5px;white-space:pre-wrap;overflow-wrap:anywhere}
+.cmdel{margin-left:auto;background:none;border:0;padding:2px;color:var(--muted);line-height:0}
+.cmdel svg{width:14px;height:14px}
+.cmform{display:flex;gap:8px;align-items:flex-end}
+.cmform textarea{flex:1;resize:none;min-height:44px;line-height:1.4}
