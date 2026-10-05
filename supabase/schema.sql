@@ -1,5 +1,5 @@
 -- Fångstboken: databasen i Supabase.
--- Återskapad 2026-09-30 från den körande databasen, plus "Senast aktiv" (4-senast-aktiv.sql) djup (5-djup.sql) dolda platser (6-dold-plats.sql) och privata fångster (7-privat.sql) (tabeller, regler, funktioner, trigger, realtid, bildlagring).
+-- Återskapad 2026-09-30 från den körande databasen, plus "Senast aktiv" (4-senast-aktiv.sql) djup (5-djup.sql) dolda platser (6-dold-plats.sql) privata fångster (7-privat.sql) och kommentarer (8-kommentarer.sql) (tabeller, regler, funktioner, trigger, realtid, bildlagring).
 --
 -- Kör hela filen i Supabase: SQL Editor -> New query -> klistra in -> Run.
 -- Filen går att köra flera gånger. Den skapar bara det som saknas och skriver om reglerna,
@@ -315,6 +315,48 @@ begin
       execute format('alter publication supabase_realtime add table public.%I', t);
     end if;
   end loop;
+end $$;
+
+-- ---------- Kommentarer ----------
+-- Gänget kommenterar fångster de kan se. Egna kommentarer, kommentarer på egna fångster och admin kan tas bort.
+create table if not exists public.catch_comments (
+  id         uuid primary key default gen_random_uuid(),
+  catch_id   uuid not null references public.catches(id) on delete cascade,
+  member_id  uuid default public.my_member_id() references public.members(id) on delete set null,
+  body       text not null check (length(btrim(body)) between 1 and 1000),
+  created_at timestamptz not null default now()
+);
+create index if not exists catch_comments_catch_idx on public.catch_comments (catch_id, created_at);
+
+grant select, insert, delete on public.catch_comments to authenticated;
+alter table public.catch_comments enable row level security;
+
+-- Läsa: bara kommentarer på fångster man själv får se (reglerna för catches gäller i underfrågan).
+drop policy if exists "gang read" on public.catch_comments;
+create policy "gang read" on public.catch_comments for select
+  using (public.is_member() and exists (select 1 from public.catches c where c.id = catch_comments.catch_id));
+
+-- Skriva: bara i eget namn, och bara på fångster man får se.
+drop policy if exists "own insert" on public.catch_comments;
+create policy "own insert" on public.catch_comments for insert
+  with check (public.is_member() and member_id = public.my_member_id()
+              and exists (select 1 from public.catches c where c.id = catch_comments.catch_id));
+
+-- Ta bort: egna kommentarer, alla kommentarer på egna fångster, eller admin.
+drop policy if exists "own delete" on public.catch_comments;
+create policy "own delete" on public.catch_comments for delete
+  using (public.is_member() and (
+    member_id = public.my_member_id() or public.is_admin()
+    or exists (select 1 from public.catches c where c.id = catch_comments.catch_id
+               and (c.member_id = public.my_member_id() or c.created_by = public.my_member_id()))));
+
+-- Realtid, så att nya kommentarer dyker upp direkt hos alla.
+do $$
+begin
+  if not exists (select 1 from pg_publication_tables
+                 where pubname = 'supabase_realtime' and schemaname = 'public' and tablename = 'catch_comments') then
+    alter publication supabase_realtime add table public.catch_comments;
+  end if;
 end $$;
 
 -- ---------- Första admin ----------
