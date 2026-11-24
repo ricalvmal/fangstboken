@@ -1,5 +1,5 @@
 -- Fångstboken: databasen i Supabase.
--- Återskapad 2026-09-30 från den körande databasen, plus "Senast aktiv" (4-senast-aktiv.sql) djup (5-djup.sql) dolda platser (6-dold-plats.sql) privata fångster (7-privat.sql) och kommentarer (8-kommentarer.sql) (tabeller, regler, funktioner, trigger, realtid, bildlagring).
+-- Återskapad 2026-09-30 från den körande databasen, plus "Senast aktiv" (4-senast-aktiv.sql) djup (5-djup.sql) dolda platser (6-dold-plats.sql) privata fångster (7-privat.sql) kommentarer (8-kommentarer.sql) och starkare keepalive (9-keepalive.sql) (tabeller, regler, funktioner, trigger, realtid, bildlagring).
 --
 -- Kör hela filen i Supabase: SQL Editor -> New query -> klistra in -> Run.
 -- Filen går att köra flera gånger. Den skapar bara det som saknas och skriver om reglerna,
@@ -183,8 +183,31 @@ create trigger members_guard before update on public.members for each row execut
 -- ---------- Funktioner som appen anropar ----------
 
 -- Den dagliga pingen från GitHub Actions, så att gratisprojektet inte pausas.
-create or replace function public.keepalive()
-returns integer language sql stable as $$ select 1 $$;
+create table if not exists public.keepalive_log (
+  id        bigint generated always as identity primary key,
+  pinged_at timestamptz not null default now()
+);
+-- Ingen kommer åt tabellen direkt. Bara funktionen nedan skriver och läser.
+alter table public.keepalive_log enable row level security;
+revoke all on public.keepalive_log from anon, authenticated;
+
+drop function if exists public.keepalive();
+create function public.keepalive()
+returns jsonb language plpgsql volatile security definer set search_path = public as $$
+declare last timestamptz;
+begin
+  select max(pinged_at) into last from public.keepalive_log;
+  if last is null or last < now() - interval '1 hour' then
+    insert into public.keepalive_log default values;
+  end if;
+  delete from public.keepalive_log where pinged_at < now() - interval '60 days';
+  return jsonb_build_object(
+    'pinged_at', (select max(pinged_at) from public.keepalive_log),
+    'pings_60d', (select count(*) from public.keepalive_log)
+  );
+end $$;
+revoke all on function public.keepalive() from public;
+grant execute on function public.keepalive() to anon, authenticated;
 
 -- Appen sparar när var och en senast var aktiv, högst var tionde minut. Alla i gänget ser det.
 create or replace function public.mark_seen()
