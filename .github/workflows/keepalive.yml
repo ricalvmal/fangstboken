@@ -1,4 +1,6 @@
 # Pingar Supabase en gång om dagen så att gratisprojektet inte pausas under vintern.
+# Pingen skriver och läser i databasen (riktig aktivitet), och körningen blir röd
+# om Supabase inte svarar, så att GitHub skickar ett mejl.
 # Läser adress och publik nyckel från config.js, så inga hemligheter behöver läggas in.
 # Den 1:a varje månad sparas en tidsstämpel i repot, eftersom GitHub stänger av
 # schemalagda körningar i repon som inte haft någon aktivitet på 60 dagar.
@@ -19,8 +21,17 @@ jobs:
           URL=$(grep -o 'supabaseUrl: *"[^"]*"' config.js | sed 's/.*"\(.*\)"/\1/')
           KEY=$(grep -o 'supabaseAnonKey: *"[^"]*"' config.js | sed 's/.*"\(.*\)"/\1/')
           if echo "$URL" | grep -q "DITT-PROJEKT"; then echo "config.js är inte ifylld än"; exit 0; fi
-          curl -fsS -X POST "$URL/rest/v1/rpc/keepalive" -H "apikey: $KEY" -H "Content-Type: application/json" -d '{}'
-          echo " ok"
+          # keepalive() skriver en rad i keepalive_log och läser tillbaka den (se supabase/9-keepalive.sql).
+          # Tre försök med paus emellan, så att ett tillfälligt nätverksfel inte larmar i onödan.
+          for i in 1 2 3; do
+            RES=$(curl -sS -m 30 -X POST "$URL/rest/v1/rpc/keepalive" -H "apikey: $KEY" -H "Content-Type: application/json" -d '{}' -w '\n%{http_code}' || true)
+            CODE=$(echo "$RES" | tail -n1); BODY=$(echo "$RES" | sed '$d')
+            if [ "$CODE" = "200" ] && echo "$BODY" | grep -q pinged_at; then echo "Supabase är vaken: $BODY"; exit 0; fi
+            echo "Försök $i misslyckades (HTTP $CODE): $BODY"
+            [ "$i" -lt 3 ] && sleep 60
+          done
+          echo "::error title=Supabase svarar inte::Projektet kan vara pausat. Öppna supabase.com/dashboard, välj projektet och tryck Restore. Kör sedan om den här körningen."
+          exit 1
       - name: Månatlig tidsstämpel
         run: |
           if [ "$(date -u +%d)" = "01" ] || [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
