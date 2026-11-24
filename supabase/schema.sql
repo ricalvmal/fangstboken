@@ -1,5 +1,5 @@
 -- Fångstboken: databasen i Supabase.
--- Återskapad 2026-09-30 från den körande databasen, plus "Senast aktiv" (4-senast-aktiv.sql) djup (5-djup.sql) dolda platser (6-dold-plats.sql) privata fångster (7-privat.sql) kommentarer (8-kommentarer.sql) och starkare keepalive (9-keepalive.sql) (tabeller, regler, funktioner, trigger, realtid, bildlagring).
+-- Återskapad 2026-09-30 från den körande databasen, plus "Senast aktiv" (4-senast-aktiv.sql) djup (5-djup.sql) dolda platser (6-dold-plats.sql) privata fångster (7-privat.sql) kommentarer (8-kommentarer.sql) och starkare keepalive (9-keepalive.sql, 10-keepalive-tabeller.sql) (tabeller, regler, funktioner, trigger, realtid, bildlagring).
 --
 -- Kör hela filen i Supabase: SQL Editor -> New query -> klistra in -> Run.
 -- Filen går att köra flera gånger. Den skapar bara det som saknas och skriver om reglerna,
@@ -194,13 +194,22 @@ revoke all on public.keepalive_log from anon, authenticated;
 drop function if exists public.keepalive();
 create function public.keepalive()
 returns jsonb language plpgsql volatile security definer set search_path = public as $$
-declare last timestamptz;
+declare last timestamptz; touched bigint := 0; n bigint;
 begin
   select max(pinged_at) into last from public.keepalive_log;
   if last is null or last < now() - interval '1 hour' then
     insert into public.keepalive_log default values;
   end if;
   delete from public.keepalive_log where pinged_at < now() - interval '60 days';
+
+  -- Läs från appens tabeller, så att det blir vanlig databasaktivitet.
+  select count(*) into n from public.members;        touched := touched + n;
+  select count(*) into n from public.lakes;          touched := touched + n;
+  select count(*) into n from public.baits;          touched := touched + n;
+  select count(*) into n from (select id from public.trips   order by started_at desc limit 50) t; touched := touched + n;
+  select count(*) into n from (select id from public.catches order by time desc limit 50) c;      touched := touched + n;
+  select count(*) into n from (select id from public.catch_comments order by created_at desc limit 50) k; touched := touched + n;
+
   return jsonb_build_object(
     'pinged_at', (select max(pinged_at) from public.keepalive_log),
     'pings_60d', (select count(*) from public.keepalive_log)
